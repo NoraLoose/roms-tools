@@ -538,8 +538,6 @@ class AtmosphericForcing:
         ds.attrs["Title"] = "ROMS bulk surface forcing file produced by roms-tools"
 
         ds = ds.assign_coords({"lon": lon, "lat": lat})
-        if dims["time"] != "time":
-            ds = ds.rename({dims["time"]: "time"})
         if self.use_coarse_grid:
             ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
             mask_roms = self.grid.ds["mask_coarse"].rename(
@@ -547,6 +545,22 @@ class AtmosphericForcing:
             )
         else:
             mask_roms = self.grid.ds["mask_rho"]
+            
+        if dims["time"] != "time":
+            ds = ds.rename({dims["time"]: "time"})
+
+        # Preserve the original time coordinate for readability
+        ds = ds.assign_coords({"absolute_time": ds["time"]})
+
+        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
+        model_reference_date = np.datetime64(self.model_reference_date)
+        ds["time"] = (
+            (ds["time"] - model_reference_date).astype("float64") / 3600 / 24 * 1e-9
+        )
+        ds["time"].attrs[
+            "long_name"
+        ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
+        ds["time"].attrs["units"] = "days"
 
         object.__setattr__(self, "ds", ds)
 
@@ -600,7 +614,7 @@ class AtmosphericForcing:
 
         title = "%s at time %s" % (
             field.long_name,
-            np.datetime_as_string(field.time, unit="s"),
+            np.datetime_as_string(field.absolute_time, unit="s"),
         )
 
         # choose colorbar
@@ -629,7 +643,8 @@ class AtmosphericForcing:
             c="g",
         )
 
-    def save(self, filepath: str, time_chunk_size: int = 1) -> None:
+    @staticmethod
+    def save(ds, filepath: str, time_chunk_size: int = 1) -> None:
         """
         Save the interpolated atmospheric forcing fields to netCDF4 files.
 
@@ -639,6 +654,8 @@ class AtmosphericForcing:
 
         Parameters
         ----------
+        ds : xarray.Dataset
+            The dataset containing the atmospheric forcing fields.
         filepath : str
             The base path and filename for the output files. The files will be named with
             the format "filepath.YYYYMM.nc" if a full month of data is included, or
@@ -657,11 +674,11 @@ class AtmosphericForcing:
         writes = []
 
         # Group dataset by year
-        gb = self.ds.groupby("time.year")
+        gb = ds.groupby("absolute_time.year")
 
         for year, group_ds in gb:
             # Further group each yearly group by month
-            sub_gb = group_ds.groupby("time.month")
+            sub_gb = group_ds.groupby("absolute_time.month")
 
             for month, ds in sub_gb:
                 # Chunk the dataset by the specified time chunk size
@@ -670,8 +687,8 @@ class AtmosphericForcing:
 
                 # Determine the number of days in the month
                 num_days_in_month = calendar.monthrange(year, month)[1]
-                first_day = ds.time.dt.day.values[0]
-                last_day = ds.time.dt.day.values[-1]
+                first_day = ds.absolute_time.dt.day.values[0]
+                last_day = ds.absolute_time.dt.day.values[-1]
 
                 # Create filename based on whether the dataset contains a full month
                 if first_day == 1 and last_day == num_days_in_month:
@@ -690,24 +707,10 @@ class AtmosphericForcing:
 
         for ds, filename in zip(datasets, filenames):
 
-            # Translate the time coordinate to days since the model reference date
-            model_reference_date = np.datetime64(self.model_reference_date)
-
-            # Preserve the original time coordinate for readability
-            ds.assign_coords({"absolute_time": ds["time"]})
-
-            # Convert the time coordinate to the format expected by ROMS (days since model reference date)
-            ds["time"] = (
-                (ds["time"] - model_reference_date).astype("float64") / 3600 / 24 * 1e-9
-            )
-            ds["time"].attrs[
-                "long_name"
-            ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
-            ds["time"].attrs["units"] = "days"
-
             # Prepare the dataset for writing to a netCDF file without immediately computing
             write = ds.to_netcdf(filename, compute=False)
             writes.append(write)
 
         # Perform the actual write operations in parallel
         dask.compute(*writes)
+

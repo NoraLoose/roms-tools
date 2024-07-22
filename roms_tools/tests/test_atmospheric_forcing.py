@@ -1189,7 +1189,7 @@ def test_atmospheric_forcing_data_consistency_plot_save(atmospheric_forcing, tmp
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
 
-    atmospheric_forcing.save(filepath)
+    atmospheric_forcing.save(atmospheric_forcing.ds, filepath)
     extended_filepath = filepath + ".20200201-01.nc"
 
     try:

@@ -1,23 +1,71 @@
 import xarray as xr
 import numpy as np
 import gcm_filters
-from scipy.interpolate import RegularGridInterpolator
+from dataclasses import dataclass, field
 from scipy.ndimage import label
-from roms_tools.setup.datasets import fetch_topo
+from roms_tools.setup.datasets import download_topography_data, Dataset
+from typing import Dict, List
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 import warnings
 from itertools import count
 
 
+@dataclass(frozen=True, kw_only=True)
+class ETOPODataset(Dataset):
+    """
+    Represents ETOPO topography data on original grid.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the ETOPO dataset.
+    var_names : List[str], optional
+        List of variable names that are required in the dataset. Defaults to
+        ["topo"].
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset. Defaults to
+        {"longitude": "lon", "latitude": "lat"}.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the topography data.
+    """
+
+    filename: str
+    var_names: List[str] = field(default_factory=lambda: ["topo"])
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
+    )
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def __post_init__(self):
+        ds = super().load_data()
+
+        # Clean up dataset
+        ds = ds.assign_coords({"lon": ds["topo_lon"], "lat": ds["topo_lat"]})
+        ds = ds.drop_vars(["topo_lon", "topo_lat"])
+        ds["topo"] = -ds["topo"]
+
+        # Select relevant fields
+        ds = super().select_relevant_fields(ds)
+
+        # Check whether the data covers the entire globe
+        is_global = super().check_if_global(ds)
+
+        if is_global:
+            ds = super().ascending_longitudes(ds)
+            ds = super().concatenate_longitudes(ds)
+
+        object.__setattr__(self, "ds", ds)
+
+
 def _add_topography_and_mask(
-    ds, topography_source, smooth_factor, hmin, rmax
+    ds, topography_source, smooth_factor, hmin, rmax, straddle
 ) -> xr.Dataset:
-    lon = ds.lon_rho.values
-    lat = ds.lat_rho.values
 
     # interpolate topography onto desired grid
-    hraw = _make_raw_topography(lon, lat, topography_source)
-    hraw = xr.DataArray(data=hraw, dims=["eta_rho", "xi_rho"])
+    hraw = _make_raw_topography(ds.lon_rho, ds.lat_rho, topography_source, straddle)
 
     # Mask is obtained by finding locations where ocean depth is positive
     mask = xr.where(hraw > 0, 1.0, 0.0)
@@ -29,7 +77,6 @@ def _add_topography_and_mask(
         "source": f"Raw bathymetry from {topography_source} (smoothing diameter {smooth_factor})",
         "units": "meter",
     }
-
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
     ds["mask_rho"] = xr.DataArray(mask, dims=("eta_rho", "xi_rho"))
@@ -37,7 +84,6 @@ def _add_topography_and_mask(
         "long_name": "Mask at rho-points",
         "units": "land/water (0/1)",
     }
-
     ds = _add_velocity_masks(ds)
 
     # smooth topography locally to satisfy r < rmax
@@ -46,42 +92,50 @@ def _add_topography_and_mask(
         "long_name": "Final bathymetry at rho-points",
         "units": "meter",
     }
-
     ds = _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax)
 
     return ds
 
 
-def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
+def _make_raw_topography(lon, lat, topography_source, grid_straddle) -> xr.DataArray:
     """
     Given a grid of (lon, lat) points, fetch the topography file and interpolate height values onto the desired grid.
     """
 
-    topo_ds = fetch_topo(topography_source)
+    fname = download_topography_data(topography_source)
 
-    # the following will depend on the topography source
     if topography_source == "etopo5":
-        topo_lon = topo_ds["topo_lon"].copy()
-        # Modify longitude values where necessary
-        topo_lon = xr.where(topo_lon < 0, topo_lon + 360, topo_lon)
-        topo_lon_minus360 = topo_lon - 360
-        topo_lon_plus360 = topo_lon + 360
-        # Concatenate along the longitude axis
-        topo_lon_concatenated = xr.concat(
-            [topo_lon_minus360, topo_lon, topo_lon_plus360], dim="lon"
-        )
-        topo_concatenated = xr.concat(
-            [-topo_ds["topo"], -topo_ds["topo"], -topo_ds["topo"]], dim="lon"
-        )
+        dims = {"latitude": "lat", "longitude": "lon"}
+        varnames = {"topography": "topo"}
 
-        interp = RegularGridInterpolator(
-            (topo_ds["topo_lat"].values, topo_lon_concatenated.values),
-            topo_concatenated.values,
-            method="linear",
-        )
+        data = ETOPODataset(filename=fname, dim_names=dims, var_names=varnames.values())
 
-    # Interpolate onto desired domain grid points
-    hraw = interp((lat, lon))
+    # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
+    lon = xr.where(lon > 180, lon - 360, lon)
+    straddle = True
+    if not grid_straddle and abs(lon).min() > 5:
+        lon = xr.where(lon < 0, lon + 360, lon)
+        straddle = False
+
+    # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
+    # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
+    # would not be detected by the nan_check function.
+    data.choose_subdomain(
+        latitude_range=[lat.min().values, lat.max().values],
+        longitude_range=[lon.min().values, lon.max().values],
+        margin=2,
+        straddle=straddle,
+    )
+
+    # interpolate onto desired grid
+    coords = {dims["latitude"]: lat, dims["longitude"]: lon}
+
+    hraw = (
+        data.ds[varnames["topography"]]
+        .interp(coords, method="linear")
+        .drop_vars(list(coords.keys()))
+        .compute()
+    )
 
     return hraw
 

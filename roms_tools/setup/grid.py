@@ -119,6 +119,9 @@ class Grid:
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
         object.__setattr__(self, "ds", ds)
 
+        # Check if the Greenwich meridian goes through the domain.
+        self._straddle()
+
         # Update self.ds with topography and mask information
         self.add_topography_and_mask(
             topography_source=self.topography_source,
@@ -126,9 +129,6 @@ class Grid:
             hmin=self.hmin,
             rmax=self.rmax,
         )
-
-        # Check if the Greenwich meridian goes through the domain.
-        self._straddle()
 
     def add_topography_and_mask(
         self, topography_source="etopo5", smooth_factor=8, hmin=5.0, rmax=0.2
@@ -165,7 +165,7 @@ class Grid:
         """
 
         ds = _add_topography_and_mask(
-            self.ds, topography_source, smooth_factor, hmin, rmax
+            self.ds, topography_source, smooth_factor, hmin, rmax, self.straddle
         )
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)

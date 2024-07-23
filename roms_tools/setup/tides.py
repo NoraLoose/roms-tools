@@ -87,10 +87,11 @@ class TPXO(Dataset):
         ds = super().select_relevant_fields(ds)
 
         # Check whether the data covers the entire globe
-        is_global = self.check_if_global(ds)
+        is_global = super().check_if_global(ds)
 
         if is_global:
-            ds = self.concatenate_longitudes(ds)
+            ds = super().ascending_longitudes(ds)
+            ds = super().concatenate_longitudes(ds)
 
         object.__setattr__(self, "ds", ds)
 
@@ -222,14 +223,9 @@ class TidalForcing:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
-        # The following consists of two steps:
-        # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
-        # We perform these two steps for two reasons:
-        # A) Since the horizontal dimensions consist of a single chunk, selecting a subdomain before interpolation is a lot more performant.
-        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes
-        # can lead to artifacts in the interpolation process. Specifically, if there is a data gap if data is not global,
-        # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
-        # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
+        # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
+        # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
+        # would not be detected by the nan_check function.
         data.choose_subdomain(
             latitude_range=[lat.min().values, lat.max().values],
             longitude_range=[lon.min().values, lon.max().values],

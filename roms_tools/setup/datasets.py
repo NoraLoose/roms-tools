@@ -7,81 +7,6 @@ import numpy as np
 from typing import Dict, Optional, List
 import dask
 
-# Create a Pooch object to manage the global topography data
-pup_data = pooch.create(
-    # Use the default cache folder for the operating system
-    path=pooch.os_cache("roms-tools"),
-    base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
-    # The registry specifies the files that can be fetched
-    registry={
-        "etopo5.nc": "sha256:23600e422d59bbf7c3666090166a0d468c8ee16092f4f14e32c4e928fbcd627b",
-    },
-)
-
-# Create a Pooch object to manage the test data
-pup_test_data = pooch.create(
-    # Use the default cache folder for the operating system
-    path=pooch.os_cache("roms-tools"),
-    base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/main/",
-    # The registry specifies the files that can be fetched
-    registry={
-        "GLORYS_test_data.nc": "648f88ec29c433bcf65f257c1fb9497bd3d5d3880640186336b10ed54f7129d2",
-        "ERA5_regional_test_data.nc": "bd12ce3b562fbea2a80a3b79ba74c724294043c28dc98ae092ad816d74eac794",
-        "ERA5_global_test_data.nc": "8ed177ab64c02caf509b9fb121cf6713f286cc603b1f302f15f3f4eb0c21dc4f",
-        "TPXO_global_test_data.nc": "457bfe87a7b247ec6e04e3c7d3e741ccf223020c41593f8ae33a14f2b5255e60",
-        "TPXO_regional_test_data.nc": "11739245e2286d9c9d342dce5221e6435d2072b50028bef2e86a30287b3b4032",
-    },
-)
-
-
-def fetch_topo(topography_source: str) -> xr.Dataset:
-    """
-    Load the global topography data as an xarray Dataset.
-
-    Parameters
-    ----------
-    topography_source : str
-        The source of the topography data to be loaded. Available options:
-        - "etopo5"
-
-    Returns
-    -------
-    xr.Dataset
-        The global topography data as an xarray Dataset.
-    """
-    # Mapping from user-specified topography options to corresponding filenames in the registry
-    topo_dict = {"etopo5": "etopo5.nc"}
-
-    # Fetch the file using Pooch, downloading if necessary
-    fname = pup_data.fetch(topo_dict[topography_source])
-
-    # Load the dataset using xarray and return it
-    ds = xr.open_dataset(fname)
-    return ds
-
-
-def download_test_data(filename: str) -> str:
-    """
-    Download the test data file.
-
-    Parameters
-    ----------
-    filename : str
-        The name of the test data file to be downloaded. Available options:
-        - "GLORYS_test_data.nc"
-        - "ERA5_regional_test_data.nc"
-        - "ERA5_global_test_data.nc"
-
-    Returns
-    -------
-    str
-        The path to the downloaded test data file.
-    """
-    # Fetch the file using Pooch, downloading if necessary
-    fname = pup_test_data.fetch(filename)
-
-    return fname
-
 
 @dataclass(frozen=True, kw_only=True)
 class Dataset:
@@ -153,6 +78,7 @@ class Dataset:
         is_global = self.check_if_global(ds)
 
         if is_global:
+            ds = self.ascending_longitudes(ds)
             ds = self.concatenate_longitudes(ds)
 
         object.__setattr__(self, "ds", ds)
@@ -300,8 +226,9 @@ class Dataset:
 
         """
         dlon_mean = (
-            ds[self.dim_names["longitude"]].diff(dim=self.dim_names["longitude"]).mean()
-        )
+            ds[self.dim_names["longitude"]].diff(dim=self.dim_names["longitude"])
+            % 360.0
+        ).mean()
         dlon = (
             ds[self.dim_names["longitude"]][0] - ds[self.dim_names["longitude"]][-1]
         ) % 360.0
@@ -309,9 +236,41 @@ class Dataset:
 
         return is_global
 
+    def ascending_longitudes(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Adjust the longitude values in the dataset to ensure they are in ascending order,
+        removing any jumps between 180 and -180 degrees by adding 360 to the second half.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The input dataset containing longitude values.
+
+        Returns
+        -------
+        xr.Dataset
+            The dataset with adjusted longitude values.
+
+        Notes
+        -----
+        This function handles cases where longitudes are split between [0, 180] and [-180, 0].
+        By adjusting longitudes to be in the range [0, 360], it ensures a continuous and ascending order.
+        """
+        lon = ds[self.dim_names["longitude"]].values
+
+        # Identify the jump between 180 and -180 degrees
+        jump_indices = np.where(np.diff(lon) < -180)[0]
+        if len(jump_indices) > 0:
+            # Adjust the longitudes by adding 360 to the second half
+            lon[jump_indices[0] + 1 :] += 360
+            # Update the longitude values in the dataset
+            ds[self.dim_names["longitude"]] = lon
+
+        return ds
+
     def concatenate_longitudes(self, ds):
         """
-        Concatenates the field three times: with longitudes shifted by -360, original longitudes, and shifted by +360.
+        Concatenates the global field three times: with longitudes shifted by -360, original longitudes, and shifted by +360.
 
         Parameters
         ----------
@@ -446,3 +405,77 @@ class Dataset:
 
         if (depth >= 0).all():
             self.ds[self.dim_names["depth"]] = -depth
+
+
+# Create a Pooch object to manage the topography data
+pup_data = pooch.create(
+    # Use the default cache folder for the operating system
+    path=pooch.os_cache("roms-tools"),
+    base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
+    # The registry specifies the files that can be fetched
+    registry={
+        "etopo5.nc": "sha256:23600e422d59bbf7c3666090166a0d468c8ee16092f4f14e32c4e928fbcd627b",
+    },
+)
+
+# Create a Pooch object to manage the test data
+pup_test_data = pooch.create(
+    # Use the default cache folder for the operating system
+    path=pooch.os_cache("roms-tools"),
+    base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/main/",
+    # The registry specifies the files that can be fetched
+    registry={
+        "GLORYS_test_data.nc": "648f88ec29c433bcf65f257c1fb9497bd3d5d3880640186336b10ed54f7129d2",
+        "ERA5_regional_test_data.nc": "bd12ce3b562fbea2a80a3b79ba74c724294043c28dc98ae092ad816d74eac794",
+        "ERA5_global_test_data.nc": "8ed177ab64c02caf509b9fb121cf6713f286cc603b1f302f15f3f4eb0c21dc4f",
+        "TPXO_global_test_data.nc": "457bfe87a7b247ec6e04e3c7d3e741ccf223020c41593f8ae33a14f2b5255e60",
+        "TPXO_regional_test_data.nc": "11739245e2286d9c9d342dce5221e6435d2072b50028bef2e86a30287b3b4032",
+    },
+)
+
+
+def download_topography_data(topography_source: str) -> str:
+    """
+    Fetch the global topography data file path.
+
+    Parameters
+    ----------
+    topography_source : str
+        The source of the topography data to be fetched. Available options:
+        - "etopo5"
+
+    Returns
+    -------
+    str
+        The file path to the global topography data.
+    """
+    # Mapping from user-specified topography options to corresponding filenames in the registry
+    topo_dict = {"etopo5": "etopo5.nc"}
+
+    # Fetch the file using Pooch, downloading if necessary
+    fname = pup_data.fetch(topo_dict[topography_source])
+
+    return fname
+
+
+def download_test_data(filename: str) -> str:
+    """
+    Download the test data file.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the test data file to be downloaded. Available options:
+        - "GLORYS_test_data.nc"
+        - "ERA5_regional_test_data.nc"
+        - "ERA5_global_test_data.nc"
+
+    Returns
+    -------
+    str
+        The path to the downloaded test data file.
+    """
+    # Fetch the file using Pooch, downloading if necessary
+    fname = pup_test_data.fetch(filename)
+
+    return fname

@@ -91,6 +91,22 @@ def non_global_dataset():
     return ds
 
 
+@pytest.fixture
+def another_global_dataset():
+    lon = np.linspace(0, 359, 360)
+    lon = np.where(lon > 180, lon - 360, lon)
+    lat = np.linspace(-90, 90, 180)
+    data = np.random.rand(180, 360)
+    ds = xr.Dataset(
+        {"var": (["latitude", "longitude"], data)},
+        coords={
+            "latitude": (["latitude"], lat),
+            "longitude": (["longitude"], lon),
+        },
+    )
+    return ds
+
+
 @pytest.mark.parametrize(
     "data_fixture, expected_time_values",
     [
@@ -279,11 +295,20 @@ def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
         os.remove(filepath)
 
 
-def test_check_if_global_with_global_dataset(global_dataset):
+@pytest.mark.parametrize(
+    "data_fixture",
+    [
+        ("global_dataset"),
+        ("another_global_dataset"),
+    ],
+)
+def test_check_if_global_with_global_dataset(data_fixture, request):
+
+    data = request.getfixturevalue(data_fixture)
 
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
-        global_dataset.to_netcdf(filepath)
+        data.to_netcdf(filepath)
     try:
         dataset = Dataset(filename=filepath, var_names=["var"])
         is_global = dataset.check_if_global(dataset.ds)

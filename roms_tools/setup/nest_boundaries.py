@@ -8,6 +8,8 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
 )
+from roms_tools.setup.plot import _plot_nesting
+import warnings
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -68,25 +70,40 @@ class NestBoundaries:
             "west": {"xi_rho": 0},
         }
 
-        lon_parent = self.parent_grid.ds["lon_rho"]
-        lat_parent = self.parent_grid.ds["lat_rho"]
+        #lon_parent = self.parent_grid.ds["lon_rho"]
+        #lat_parent = self.parent_grid.ds["lat_rho"]
+        parent_grid_ds = self.parent_grid_ds
+        child_grid_ds = self.child_grid.ds
 
-        i_eta = np.arange(-0.5, len(lon_parent.eta_rho) + -0.5, 1)
-        i_xi = np.arange(-0.5, len(lon_parent.xi_rho) + -0.5, 1)
+        #i_eta = np.arange(-0.5, len(lon_parent.eta_rho) + -0.5, 1)
+        #i_xi = np.arange(-0.5, len(lon_parent.xi_rho) + -0.5, 1)
+        i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
+        i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
 
-        lon_parent = lon_parent.assign_coords(i_eta=("eta_rho", i_eta)).assign_coords(
+        #lon_parent = lon_parent.assign_coords(i_eta=("eta_rho", i_eta)).assign_coords(
+        #    i_xi=("xi_rho", i_xi)
+        #)
+        #lat_parent = lat_parent.assign_coords(i_eta=("eta_rho", i_eta)).assign_coords(
+        #    i_xi=("xi_rho", i_xi)
+        #)
+        parent_grid_ds = parent_grid_ds.assign_coords(i_eta=("eta_rho", i_eta)).assign_coords(
             i_xi=("xi_rho", i_xi)
-        )
-        lat_parent = lat_parent.assign_coords(i_eta=("eta_rho", i_eta)).assign_coords(
-            i_xi=("xi_rho", i_xi)
-        )
+                    if self.parent_grid.straddle:
+                        lon_child = xr.where(
+                            lon_child > 180, lon_child - 360, lon_child
+                        )
+                    else:
+                        lon_child = xr.where(lon_child < 0, lon_child + 360, lon_child)
 
         if self.parent_grid.straddle:
-            lon_parent = xr.where(lon_parent > 180, lon_parent - 360, lon_parent)
+            #lon_parent = xr.where(lon_parent > 180, lon_parent - 360, lon_parent)
+            for grid_ds in [parent_grid_ds, child_grid_ds]:
+                grid_ds["lon_rho"] = xr.where(grid_ds["lon_rho"] > 180, grid_ds["lon_rho"] - 360, grid_ds["lon_rho"])
         else:
-            lon_parent = xr.where(lon_parent < 0, lon_parent + 360, lon_parent)
+            #lon_parent = xr.where(lon_parent < 0, lon_parent + 360, lon_parent)
+            for grid_ds in [parent_grid_ds, child_grid_ds]:
+                grid_ds["lon_rho"] = xr.where(grid_ds["lon_rho"] < 0, grid_ds["lon_rho"] + 360, grid_ds["lon_rho"])
 
-        child_grid_ds = self.child_grid.ds
         # add angles at u- and v-points
         child_grid_ds["angle_u"] = interpolate_from_rho_to_u(child_grid_ds["angle"])
         child_grid_ds["angle_v"] = interpolate_from_rho_to_v(child_grid_ds["angle"])
@@ -129,13 +146,14 @@ class NestBoundaries:
                     mask_child = child_grid_ds[names["mask"]].isel(
                         **bdry_coords[direction]
                     )
-
-                    if self.parent_grid.straddle:
-                        lon_child = xr.where(
-                            lon_child > 180, lon_child - 360, lon_child
-                        )
-                    else:
-                        lon_child = xr.where(lon_child < 0, lon_child + 360, lon_child)
+                    #if self.parent_grid.straddle:
+                    #    lon_child = xr.where(
+                    #        lon_child > 180, lon_child - 360, lon_child
+                    #    )
+                    #else:
+                    #    lon_child = xr.where(lon_child < 0, lon_child + 360, lon_child)
+                    
+                    # Crop parent grid to minimial size to avoid aliased interpolated indices
 
                     i_eta, i_xi = interpolate_indices(
                         lon_parent,
@@ -164,6 +182,79 @@ class NestBoundaries:
         ds = ds.rename(dims_to_rename)
 
         object.__setattr__(self, "ds", ds)
+
+    def plot(self) -> None:
+        """
+        Plot the parent and child grids in a single figure.
+
+        Returns
+        -------
+        None
+            This method does not return any value. It generates and displays a plot.
+
+        """
+
+        _plot_nesting(self.parent_grid.ds, self.child_grid.ds, self.parent_grid.straddle)
+
+
+def refine_region(parent_ds, latitude_range, longitude_range, iterations=5):
+    """
+    Refine the region of the grid to match boundary conditions.
+
+    Parameters
+    ----------
+    lons : xarray.DataArray
+        Longitudes of the grid.
+    lats : xarray.DataArray
+        Latitudes of the grid.
+    ips : xarray.DataArray
+        i-indices of the grid.
+    jps : xarray.DataArray
+        j-indices of the grid.
+    lonbc_mn : float
+        Minimum longitude boundary condition.
+    lonbc_mx : float
+        Maximum longitude boundary condition.
+    latbc_mn : float
+        Minimum latitude boundary condition.
+    latbc_mx : float
+        Maximum latitude boundary condition.
+    iterations : int, optional
+        Number of iterations to refine the region. Default is 5.
+
+    Returns
+    -------
+    lons : xarray.DataArray
+        Refined longitudes.
+    lats : xarray.DataArray
+        Refined latitudes.
+    ips : xarray.DataArray
+        Refined i-indices.
+    jps : xarray.DataArray
+        Refined j-indices.
+    """
+    lat_min, lat_max = latitude_range
+    lon_min, lon_max = longitude_range
+
+    for _ in range(iterations):
+        nxs, nys = lons.shape
+
+        parent_lon_min = parent_ds["lon_rho"].min()
+        lon_mx = lons.max(dim='xi')
+        lat_mn = lats.min(dim='eta')
+        lat_mx = lats.max(dim='eta')
+
+        i0 = (lon_mx < lonbc_mn).argmin().item() if (lon_mx < lonbc_mn).any() else 0
+        i1 = (lon_mn > lonbc_mx).argmax().item() if (lon_mn > lonbc_mx).any() else nxs - 1
+        j0 = (lat_mx < latbc_mn).argmin().item() if (lat_mx < latbc_mn).any() else 0
+        j1 = (lat_mn > latbc_mx).argmax().item() if (lat_mn > latbc_mx).any() else nys - 1
+
+        lons = lons.isel(xi=slice(i0, i1 + 1), eta=slice(j0, j1 + 1))
+        lats = lats.isel(xi=slice(i0, i1 + 1), eta=slice(j0, j1 + 1))
+        ips = ips.isel(xi=slice(i0, i1 + 1), eta=slice(j0, j1 + 1))
+        jps = jps.isel(xi=slice(i0, i1 + 1), eta=slice(j0, j1 + 1))
+
+    return lons, lats, ips, jps
 
 
 def interpolate_indices(lon_parent, lat_parent, i_parent, j_parent, lon, lat, mask):
@@ -221,9 +312,9 @@ def interpolate_indices(lon_parent, lat_parent, i_parent, j_parent, lon, lat, ma
     # Check whether indices are close to border of parent grid
     if len(i_chk) > 0:
         if np.min(i_chk) < 0 or np.max(i_chk) > nxp - 2:
-            raise Warning('Some points are borderline.')
+            warnings.warn('Some points are borderline.')
     if len(j_chk) > 0:
         if np.min(j_chk) < 0 or np.max(j_chk) > nyp - 2:
-            raise Warning('Some points are borderline.')
+            warnings.warn('Some points are borderline.')
 
     return i, j

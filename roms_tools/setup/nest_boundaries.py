@@ -11,9 +11,9 @@ from roms_tools.setup.utils import (
 
 
 @dataclass(frozen=True, kw_only=True)
-class ChildBoundaries:
+class NestBoundaries:
     """
-    Represents atmospheric forcing data for ocean modeling.
+    Represents relation between parent and child grid for nested ROMS simulations.
 
     Parameters
     ----------
@@ -23,7 +23,7 @@ class ChildBoundaries:
         Object representing the child grid information.
     boundaries : Dict[str, bool], optional
         Dictionary specifying which boundaries of the child grid are to be forced (south, east, north, west). Default is all True.
-    prefix : str
+    child_prefix : str
     Attributes
     ----------
     ds : xr.Dataset
@@ -40,7 +40,7 @@ class ChildBoundaries:
             "west": True,
         }
     )
-    prefix: str = "child"
+    child_prefix: str = "child"
 
     def __post_init__(self):
 
@@ -98,30 +98,35 @@ class ChildBoundaries:
             if self.boundaries[direction]:
                 for grid_location in ["rho", "u", "v"]:
                     if grid_location == "rho":
-                        dim_names = {"latitude": "lat_rho", "longitude": "lon_rho"}
+                        names = {"latitude": "lat_rho", "longitude": "lon_rho", "mask": "mask_rho"}
                         bdry_coords = bdry_coords_rho
                         suffix = "r"
                     elif grid_location == "u":
-                        dim_names = {
+                        names = {
                             "latitude": "lat_u",
                             "longitude": "lon_u",
+                            "mask": "mask_u",
                             "angle": "angle_u",
                         }
                         bdry_coords = bdry_coords_u
                         suffix = "u"
                     elif grid_location == "v":
-                        dim_names = {
+                        names = {
                             "latitude": "lat_v",
                             "longitude": "lon_v",
+                            "mask": "mask_v",
                             "angle": "angle_v",
                         }
                         bdry_coords = bdry_coords_v
                         suffix = "v"
 
-                    lon_child = child_grid_ds[dim_names["longitude"]].isel(
+                    lon_child = child_grid_ds[names["longitude"]].isel(
                         **bdry_coords[direction]
                     )
-                    lat_child = child_grid_ds[dim_names["latitude"]].isel(
+                    lat_child = child_grid_ds[names["latitude"]].isel(
+                        **bdry_coords[direction]
+                    )
+                    mask_child = child_grid_ds[names["mask"]].isel(
                         **bdry_coords[direction]
                     )
 
@@ -139,24 +144,29 @@ class ChildBoundaries:
                         lon_parent.i_xi,
                         lon_child,
                         lat_child,
+                        mask_child
                     )
 
                     if grid_location == "rho":
-                        ds[f"{self.prefix}_{direction}_{suffix}"] = xr.concat(
+                        ds[f"{self.child_prefix}_{direction}_{suffix}"] = xr.concat(
                             [i_eta, i_xi], dim="two"
                         )  # dimension name "two" is suboptimal but inherited from matlab scripts
                     else:
-                        angle_child = child_grid_ds[dim_names["angle"]].isel(
+                        angle_child = child_grid_ds[names["angle"]].isel(
                             **bdry_coords[direction]
                         )
-                        ds[f"{self.prefix}_{direction}_{suffix}"] = xr.concat(
+                        ds[f"{self.child_prefix}_{direction}_{suffix}"] = xr.concat(
                             [i_eta, i_xi, angle_child], dim="three"
                         )  # dimension name "three" is suboptimal but inherited from matlab scripts
+
+        # Rename dimensions
+        dims_to_rename = {dim: f"{self.child_prefix}_{dim}" for dim in ds.dims if dim not in ["two", "three"]}
+        ds = ds.rename(dims_to_rename)
 
         object.__setattr__(self, "ds", ds)
 
 
-def interpolate_indices(lon_parent, lat_parent, i_parent, j_parent, lon, lat):
+def interpolate_indices(lon_parent, lat_parent, i_parent, j_parent, lon, lat, mask):
     """
     Interpolate the parent indices to the child grid.
 
@@ -174,7 +184,8 @@ def interpolate_indices(lon_parent, lat_parent, i_parent, j_parent, lon, lat):
         Longitudes of the child grid where interpolation is desired.
     lat : xarray.DataArray
         Latitudes of the child grid where interpolation is desired.
-
+    mask: xarray.DataArray
+        Mask for the child grid.
     Returns
     -------
     i : xarray.DataArray
@@ -197,5 +208,22 @@ def interpolate_indices(lon_parent, lat_parent, i_parent, j_parent, lon, lat):
 
     i = xr.DataArray(i, dims=lon.dims)
     j = xr.DataArray(j, dims=lon.dims)
+
+    # Check unmasked i- and j-indices
+    i_chk = i[mask == 1]
+    j_chk = j[mask == 1]
+
+    # Check for NaN values
+    if np.sum(np.isnan(i_chk)) > 0 or np.sum(np.isnan(j_chk)):
+        raise ValueError('Some unmasked points are outside the grid. Please choose either a bigger parent grid or a smaller child grid.')
+    
+    nxp, nyp = lon_parent.shape
+    # Check whether indices are close to border of parent grid
+    if len(i_chk) > 0:
+        if np.min(i_chk) < 0 or np.max(i_chk) > nxp - 2:
+            raise Warning('Some points are borderline.')
+    if len(j_chk) > 0:
+        if np.min(j_chk) < 0 or np.max(j_chk) > nyp - 2:
+            raise Warning('Some points are borderline.')
 
     return i, j

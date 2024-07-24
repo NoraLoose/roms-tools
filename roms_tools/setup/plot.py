@@ -12,6 +12,7 @@ def _plot(
     c="red",
     title="",
     kwargs={},
+    ax=None
 ):
 
     if field is None:
@@ -201,3 +202,74 @@ def _line_plot(field, title=""):
     field.plot()
     ax.set_title(title)
     ax.grid()
+
+
+def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle):
+
+    parent_lon_deg = parent_grid_ds["lon_rho"]
+    parent_lat_deg = parent_grid_ds["lat_rho"]
+    
+    child_lon_deg = child_grid_ds["lon_rho"]
+    child_lat_deg = child_grid_ds["lat_rho"]
+
+    if parent_straddle:
+        parent_lon_deg = xr.where(parent_lon_deg > 180, parent_lon_deg - 360, parent_lon_deg)
+        child_lon_deg = xr.where(child_lon_deg > 180, child_lon_deg - 360, child_lon_deg)
+    
+    # Define projections
+    proj = ccrs.PlateCarree()
+
+    trans = ccrs.NearsidePerspective(
+        central_longitude=parent_lon_deg.mean().values, central_latitude=parent_lat_deg.mean().values
+    )
+
+    parent_lon_deg = parent_lon_deg.values
+    parent_lat_deg = parent_lat_deg.values
+    child_lon_deg = child_lon_deg.values
+    child_lat_deg = child_lat_deg.values
+    
+
+    # find corners
+    parent_corners = [
+        (parent_lon_deg[0, 0], parent_lat_deg[0, 0]),
+        (parent_lon_deg[0, -1], parent_lat_deg[0, -1]),
+        (parent_lon_deg[-1, -1], parent_lat_deg[-1, -1]),
+        (parent_lon_deg[-1, 0], parent_lat_deg[-1, 0]),
+    ]
+    child_corners = [
+        (child_lon_deg[0, 0], child_lat_deg[0, 0]),
+        (child_lon_deg[0, -1], child_lat_deg[0, -1]),
+        (child_lon_deg[-1, -1], child_lat_deg[-1, -1]),
+        (child_lon_deg[-1, 0], child_lat_deg[-1, 0]),
+    ]
+
+    # transform coordinates to projected space
+    transformed_parent_corners = [trans.transform_point(lo, la, proj) for lo, la in parent_corners]
+    transformed_parent_lons, transformed_parent_lats = zip(*transformed_parent_corners)
+    transformed_child_corners = [trans.transform_point(lo, la, proj) for lo, la in child_corners]
+    transformed_child_lons, transformed_child_lats = zip(*transformed_child_corners)
+
+    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
+
+    
+    ax.plot(
+        list(transformed_parent_lons) + [transformed_parent_lons[0]],
+        list(transformed_parent_lats) + [transformed_parent_lats[0]],
+        "o-",
+        c='r',
+        label="parent grid"
+    )
+    ax.plot(
+        list(transformed_child_lons) + [transformed_child_lons[0]],
+        list(transformed_child_lats) + [transformed_child_lats[0]],
+        "o-",
+        c='g',
+        label="child grid"
+    )
+
+    ax.coastlines(
+        resolution="50m", linewidth=0.5, color="black"
+    )  # add map of coastlines
+    ax.gridlines()
+    ax.legend()
+

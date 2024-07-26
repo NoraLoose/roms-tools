@@ -450,8 +450,9 @@ def download_topography_data(topography_source: str) -> str:
     Parameters
     ----------
     topography_source : str
-        The source of the topography data to be fetched. Available options:
-        - "etopo5"
+        The source of the topography data to be loaded. Available options:
+        - "ETOPO5"
+
 
     Returns
     -------
@@ -459,7 +460,7 @@ def download_topography_data(topography_source: str) -> str:
         The file path to the global topography data.
     """
     # Mapping from user-specified topography options to corresponding filenames in the registry
-    topo_dict = {"etopo5": "etopo5.nc"}
+    topo_dict = {"ETOPO5": "etopo5.nc"}
 
     # Fetch the file using Pooch, downloading if necessary
     fname = pup_data.fetch(topo_dict[topography_source])
@@ -488,3 +489,5 @@ def download_test_data(filename: str) -> str:
     fname = pup_test_data.fetch(filename)
 
     return fname
+
+

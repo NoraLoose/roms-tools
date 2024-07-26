@@ -104,10 +104,9 @@ def _make_raw_topography(lon, lat, topography_source, grid_straddle) -> xr.DataA
 
     fname = download_topography_data(topography_source)
 
-    if topography_source == "etopo5":
+    if topography_source == "ETOPO5":
         dims = {"latitude": "lat", "longitude": "lon"}
         varnames = {"topography": "topo"}
-
         data = ETOPODataset(filename=fname, dim_names=dims, var_names=varnames.values())
 
     # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian

@@ -489,5 +489,3 @@ def download_test_data(filename: str) -> str:
     fname = pup_test_data.fetch(filename)
 
     return fname
-
-

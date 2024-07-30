@@ -274,6 +274,10 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle):
         label="child grid",
     )
 
+    ax.pcolormesh(
+        parent_lon_deg, parent_lat_deg, parent_grid_ds.mask_rho, transform=proj
+    )
+
     ax.coastlines(
         resolution="50m", linewidth=0.5, color="black"
     )  # add map of coastlines

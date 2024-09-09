@@ -108,36 +108,37 @@ class ROMSToolsMixins:
         fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
 
         # 2d interpolation
-        coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
+        if vars_2d:
+            coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
 
-        for var in vars_2d:
-            if "time" in data.dim_names:
-                mask = xr.where(
-                    data.ds[data.var_names[var]]
-                    .isel({data.dim_names["time"]: 0})
-                    .isnull(),
-                    0,
-                    1,
+            for var in vars_2d:
+                if "time" in data.dim_names:
+                    mask = xr.where(
+                        data.ds[data.var_names[var]]
+                        .isel({data.dim_names["time"]: 0})
+                        .isnull(),
+                        0,
+                        1,
+                    )
+                else:
+                    mask = xr.where(data.ds[data.var_names[var]].isnull(), 0, 1)
+
+                # propagate ocean values into land areas
+                data.ds[data.var_names[var]] = lateral_fill(
+                    data.ds[data.var_names[var]].astype(np.float64).where(mask),
+                    1 - mask,
+                    dims=fill_dims,
                 )
-            else:
-                mask = xr.where(data.ds[data.var_names[var]].isnull(), 0, 1)
 
-            # propagate ocean values into land areas
-            data.ds[data.var_names[var]] = lateral_fill(
-                data.ds[data.var_names[var]].astype(np.float64).where(mask),
-                1 - mask,
-                dims=fill_dims,
-            )
+                # interpolate
+                data_vars[var] = (
+                    data.ds[data.var_names[var]]
+                    .interp(coords=coords, method="linear")
+                    .drop_vars(list(coords.keys()))
+                )
 
-            # interpolate
-            data_vars[var] = (
-                data.ds[data.var_names[var]]
-                .interp(coords=coords, method="linear")
-                .drop_vars(list(coords.keys()))
-            )
-
+        # 3d interpolation
         if vars_3d:
-            # 3d interpolation
             coords = {
                 data.dim_names["depth"]: self.grid.ds["layer_depth_rho"],
                 data.dim_names["latitude"]: lat,
@@ -175,11 +176,6 @@ class ROMSToolsMixins:
                     .interp(coords=coords, method="linear", kwargs={"fill_value": None})
                     .drop_vars(list(coords.keys()))
                 )
-
-                if data.dim_names["time"] != "time":
-                    data_vars[var] = data_vars[var].rename(
-                        {data.dim_names["time"]: "time"}
-                    )
 
                 # transpose to correct order (time, s_rho, eta_rho, xi_rho)
                 data_vars[var] = data_vars[var].transpose(

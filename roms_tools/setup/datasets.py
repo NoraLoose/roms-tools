@@ -90,6 +90,9 @@ class Dataset:
             ds = self.add_time_info(ds)
             ds = self.select_relevant_times(ds)
 
+            if self.dim_names["time"] != "time":
+                ds = ds.rename({self.dim_names["time"]: "time"})
+
         # Select relevant fields
         ds = self.select_relevant_fields(ds)
 

@@ -10,7 +10,11 @@ import importlib.metadata
 from typing import Union
 from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
-from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    interpolate_from_rho_to_q,
+)
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
 import warnings
@@ -137,7 +141,7 @@ class Grid:
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
 
-        ds = _add_lat_lon_at_velocity_points(self.ds, self.straddle)
+        ds = _add_lat_lon_at_velocity_and_vorticity_points(self.ds, self.straddle)
         object.__setattr__(self, "ds", ds)
 
         # Update the grid by adding grid variables that are coarsened versions of the original grid variables
@@ -596,8 +600,11 @@ class Grid:
         # Check if the Greenwich meridian goes through the domain.
         grid._straddle()
 
-        if not all(coord in grid.ds for coord in ["lat_u", "lon_u", "lat_v", "lon_v"]):
-            ds = _add_lat_lon_at_velocity_points(grid.ds, grid.straddle)
+        if not all(
+            coord in grid.ds
+            for coord in ["lat_u", "lon_u", "lat_v", "lon_v", "lat_q", "lon_q"]
+        ):
+            ds = _add_lat_lon_at_velocity_and_vorticity_points(grid.ds, grid.straddle)
             object.__setattr__(grid, "ds", ds)
 
         # Coarsen the grid if necessary
@@ -1237,7 +1244,7 @@ def _f2c_xdir(f):
     return fc
 
 
-def _add_lat_lon_at_velocity_points(ds, straddle):
+def _add_lat_lon_at_velocity_and_vorticity_points(ds, straddle):
 
     if straddle:
         # avoid jump from 360 to 0 in interpolation
@@ -1250,16 +1257,21 @@ def _add_lat_lon_at_velocity_points(ds, straddle):
     lon_u = interpolate_from_rho_to_u(lon_rho)
     lat_v = interpolate_from_rho_to_v(lat_rho)
     lon_v = interpolate_from_rho_to_v(lon_rho)
+    lat_q = interpolate_from_rho_to_q(lat_rho)
+    lon_q = interpolate_from_rho_to_q(lon_rho)
 
     if straddle:
         # convert back to range [0, 360]
         lon_u = xr.where(lon_u < 0, lon_u + 360, lon_u)
         lon_v = xr.where(lon_v < 0, lon_v + 360, lon_v)
+        lon_q = xr.where(lon_q < 0, lon_q + 360, lon_q)
 
     lat_u.attrs = {"long_name": "latitude of u-points", "units": "degrees North"}
     lon_u.attrs = {"long_name": "longitude of u-points", "units": "degrees East"}
     lat_v.attrs = {"long_name": "latitude of v-points", "units": "degrees North"}
     lon_v.attrs = {"long_name": "longitude of v-points", "units": "degrees East"}
+    lat_q.attrs = {"long_name": "latitude of q-points", "units": "degrees North"}
+    lon_q.attrs = {"long_name": "longitude of q-points", "units": "degrees East"}
 
     ds = ds.assign_coords(
         {
@@ -1267,6 +1279,8 @@ def _add_lat_lon_at_velocity_points(ds, straddle):
             "lon_u": lon_u,
             "lat_v": lat_v,
             "lon_v": lon_v,
+            "lat_q": lat_q,
+            "lon_q": lon_q,
         }
     )
 

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.fill import fill_and_interpolate
+from roms_tools.setup.fill import lateral_fill
 from roms_tools.setup.utils import (
     extrapolate_deepest_to_bottom,
     interpolate_from_rho_to_u,
@@ -105,19 +105,35 @@ class ROMSToolsMixins:
 
         # interpolate onto desired grid
         data_vars = {}
+        fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
 
         # 2d interpolation
-        fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
         coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
-        for var in vars_2d:
-            mask = xr.where(data.ds[data.var_names[var]].isel(time=0).isnull(), 0, 1)
 
-            data_vars[var] = fill_and_interpolate(
-                data.ds[data.var_names[var]].astype(np.float64),
-                mask,
-                fill_dims=fill_dims,
-                coords=coords,
-                method="linear",
+        for var in vars_2d:
+            if "time" in data.dim_names:
+                mask = xr.where(
+                    data.ds[data.var_names[var]]
+                    .isel({data.dim_names["time"]: 0})
+                    .isnull(),
+                    0,
+                    1,
+                )
+            else:
+                mask = xr.where(data.ds[data.var_names[var]].isnull(), 0, 1)
+
+            # propagate ocean values into land areas
+            data.ds[data.var_names[var]] = lateral_fill(
+                data.ds[data.var_names[var]].astype(np.float64).where(mask),
+                1 - mask,
+                dims=fill_dims,
+            )
+
+            # interpolate
+            data_vars[var] = (
+                data.ds[data.var_names[var]]
+                .interp(coords=coords, method="linear")
+                .drop_vars(list(coords.keys()))
             )
 
         if vars_3d:
@@ -127,32 +143,48 @@ class ROMSToolsMixins:
                 data.dim_names["latitude"]: lat,
                 data.dim_names["longitude"]: lon,
             }
-        # extrapolate deepest value all the way to bottom ("flooding")
-        for var in vars_3d:
-            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
-                data.ds[data.var_names[var]], data.dim_names["depth"]
-            )
-            mask = xr.where(data.ds[data.var_names[var]].isel(time=0).isnull(), 0, 1)
+            # extrapolate deepest value all the way to bottom ("flooding")
+            for var in vars_3d:
+                data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
+                    data.ds[data.var_names[var]], data.dim_names["depth"]
+                )
+                if "time" in data.dim_names:
+                    mask = xr.where(
+                        data.ds[data.var_names[var]]
+                        .isel({data.dim_names["time"]: 0})
+                        .isnull(),
+                        0,
+                        1,
+                    )
+                else:
+                    mask = xr.where(data.ds[data.var_names[var]].isnull(), 0, 1)
 
-            # setting fillvalue_interp to None means that we allow extrapolation in the
-            # interpolation step to avoid NaNs at the surface if the lowest depth in original
-            # data is greater than zero
+                # propagate ocean values into land areas
+                data.ds[data.var_names[var]] = lateral_fill(
+                    data.ds[data.var_names[var]].astype(np.float64).where(mask),
+                    1 - mask,
+                    dims=fill_dims,
+                )
 
-            data_vars[var] = fill_and_interpolate(
-                data.ds[data.var_names[var]].astype(np.float64),
-                mask,
-                fill_dims=fill_dims,
-                coords=coords,
-                method="linear",
-                fillvalue_interp=None,
-            )
-            if data.dim_names["time"] != "time":
-                data_vars[var] = data_vars[var].rename({data.dim_names["time"]: "time"})
+                # interpolate
+                # setting fillvalue to None means that we allow extrapolation in the
+                # interpolation step to avoid NaNs at the surface if the lowest depth in original
+                # data is greater than zero
+                data_vars[var] = (
+                    data.ds[data.var_names[var]]
+                    .interp(coords=coords, method="linear", kwargs={"fill_value": None})
+                    .drop_vars(list(coords.keys()))
+                )
 
-            # transpose to correct order (time, s_rho, eta_rho, xi_rho)
-            data_vars[var] = data_vars[var].transpose(
-                "time", "s_rho", "eta_rho", "xi_rho"
-            )
+                if data.dim_names["time"] != "time":
+                    data_vars[var] = data_vars[var].rename(
+                        {data.dim_names["time"]: "time"}
+                    )
+
+                # transpose to correct order (time, s_rho, eta_rho, xi_rho)
+                data_vars[var] = data_vars[var].transpose(
+                    "time", "s_rho", "eta_rho", "xi_rho"
+                )
 
         return data_vars
 

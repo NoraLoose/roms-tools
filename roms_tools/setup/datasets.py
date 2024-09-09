@@ -605,15 +605,16 @@ class TPXODataset(Dataset):
                 ),  # lat_r is constant along nx, i.e., is only a function of ny
             }
         )
-        ds = ds.rename({"nx": "longitude", "ny": "latitude"})
-
+        ds = ds.rename(
+            {"nx": "longitude", "ny": "latitude", self.dim_names["ntides"]: "ntides"}
+        )
         object.__setattr__(
             self,
             "dim_names",
             {
                 "latitude": "latitude",
                 "longitude": "longitude",
-                "ntides": self.dim_names["ntides"],
+                "ntides": "ntides",
             },
         )
         self.check_dataset(ds)
@@ -651,6 +652,28 @@ class TPXODataset(Dataset):
             raise ValueError(
                 f"The dataset contains fewer than {ntides} tidal constituents."
             )
+
+    def post_process(self):
+        """
+        Apply a depth-based mask to the dataset.
+
+        This method checks if the 'depth' variable is present in the dataset. If so, it creates a mask where
+        values of 'depth' greater than 0 are considered valid. The mask is applied to all data variables, setting
+        values at invalid depths (depth ≤ 0) to NaN.
+
+        This ensures that only data corresponding to positive depths is retained.
+
+        Returns
+        -------
+        None
+            The dataset is modified in-place.
+        """
+
+        if "depth" in self.var_names.keys():
+            mask = xr.where(self.ds["depth"] > 0, 1, 0)
+
+            for var in self.ds.data_vars:
+                self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
 
 @dataclass(frozen=True, kw_only=True)

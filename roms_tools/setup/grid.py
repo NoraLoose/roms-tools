@@ -13,7 +13,6 @@ from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plo
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
-    interpolate_from_rho_to_q,
 )
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
@@ -141,7 +140,6 @@ class Grid:
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
 
-        ds = _add_lat_lon_at_velocity_and_vorticity_points(self.ds, self.straddle)
         object.__setattr__(self, "ds", ds)
 
         # Update the grid by adding grid variables that are coarsened versions of the original grid variables
@@ -600,19 +598,16 @@ class Grid:
         # Check if the Greenwich meridian goes through the domain.
         grid._straddle()
 
-        if not all(
-            coord in grid.ds
-            for coord in ["lat_u", "lon_u", "lat_v", "lon_v", "lat_q", "lon_q"]
-        ):
-            ds = _add_lat_lon_at_velocity_and_vorticity_points(grid.ds, grid.straddle)
+        if not all(coord in grid.ds for coord in ["lat_u", "lon_u", "lat_v", "lon_v"]):
+            ds = _add_lat_lon_at_velocity_points(grid.ds, grid.straddle)
             object.__setattr__(grid, "ds", ds)
 
         # Coarsen the grid if necessary
         if not all(
             var in grid.ds
             for var in [
-                "lon_coarse",
                 "lat_coarse",
+                "lon_coarse",
                 "angle_coarse",
                 "mask_coarse",
             ]
@@ -808,7 +803,6 @@ def _make_grid_ds(
 
     # rotate coordinate system
     rotated_lon_lat_vars = _rotate(*initial_lon_lat_vars, rot)
-    lon, *_ = rotated_lon_lat_vars
 
     # translate coordinate system
     translated_lon_lat_vars = _translate(*rotated_lon_lat_vars, center_lat, center_lon)
@@ -820,7 +814,28 @@ def _make_grid_ds(
     # compute angle of local grid positive x-axis relative to east
     ang = _compute_angle(lon, lonu, latu, lonq)
 
-    ds = _create_grid_ds(lon, lat, pm, pn, ang, rot, center_lon, center_lat)
+    # make sure lons are in [0, 360] range
+    lon[lon < 0] = lon[lon < 0] + 2 * np.pi
+    lonu[lonu < 0] = lonu[lonu < 0] + 2 * np.pi
+    lonv[lonv < 0] = lonv[lonv < 0] + 2 * np.pi
+    lonq[lonq < 0] = lonq[lonq < 0] + 2 * np.pi
+
+    ds = _create_grid_ds(
+        lon,
+        lat,
+        lonu,
+        latu,
+        lonv,
+        latv,
+        lonq,
+        latq,
+        pm,
+        pn,
+        ang,
+        rot,
+        center_lon,
+        center_lat,
+    )
 
     ds = _add_global_metadata(ds, size_x, size_y, center_lon, center_lat, rot)
 
@@ -1099,15 +1114,18 @@ def _compute_angle(lon, lonu, latu, lonq):
     ang[:, 0] = ang[:, 1]
     ang[:, -1] = ang[:, -2]
 
-    lon[lon < 0] = lon[lon < 0] + 2 * np.pi
-    lonq[lonq < 0] = lonq[lonq < 0] + 2 * np.pi
-
     return ang
 
 
 def _create_grid_ds(
     lon,
     lat,
+    lonu,
+    latu,
+    lonv,
+    latv,
+    lonq,
+    latq,
     pm,
     pn,
     angle,
@@ -1127,8 +1145,49 @@ def _create_grid_ds(
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
     )
+    lon_u = xr.Variable(
+        data=lonu * 180 / np.pi,
+        dims=["eta_rho", "xi_u"],
+        attrs={"long_name": "longitude of u-points", "units": "degrees East"},
+    )
+    lat_u = xr.Variable(
+        data=latu * 180 / np.pi,
+        dims=["eta_rho", "xi_u"],
+        attrs={"long_name": "latitude of u-points", "units": "degrees North"},
+    )
+    lon_v = xr.Variable(
+        data=lonv * 180 / np.pi,
+        dims=["eta_v", "xi_rho"],
+        attrs={"long_name": "longitude of v-points", "units": "degrees East"},
+    )
+    lat_v = xr.Variable(
+        data=latv * 180 / np.pi,
+        dims=["eta_v", "xi_rho"],
+        attrs={"long_name": "latitude of v-points", "units": "degrees North"},
+    )
+    lon_q = xr.Variable(
+        data=lonq * 180 / np.pi,
+        dims=["eta_psi", "xi_psi"],
+        attrs={"long_name": "longitude of psi-points", "units": "degrees East"},
+    )
+    lat_q = xr.Variable(
+        data=latq * 180 / np.pi,
+        dims=["eta_psi", "xi_psi"],
+        attrs={"long_name": "latitude of psi-points", "units": "degrees North"},
+    )
 
-    ds = ds.assign_coords({"lat_rho": lat_rho, "lon_rho": lon_rho})
+    ds = ds.assign_coords(
+        {
+            "lat_rho": lat_rho,
+            "lon_rho": lon_rho,
+            "lat_u": lat_u,
+            "lon_u": lon_u,
+            "lat_v": lat_v,
+            "lon_v": lon_v,
+            "lat_psi": lat_q,
+            "lon_psi": lon_q,
+        }
+    )
 
     ds["angle"] = xr.Variable(
         data=angle,
@@ -1244,8 +1303,33 @@ def _f2c_xdir(f):
     return fc
 
 
-def _add_lat_lon_at_velocity_and_vorticity_points(ds, straddle):
+def _add_lat_lon_at_velocity_points(ds, straddle):
+    """
+    Adds latitude and longitude coordinates at velocity points (u and v points) to the dataset.
 
+    This function computes approximate latitude and longitude values at u and v velocity points
+    based on the rho points (cell centers). If the grid straddles the Greenwich meridian, it adjusts
+    the longitudes to avoid jumps from 360 to 0 degrees. The computed coordinates are added to the
+    dataset as new variables with appropriate metadata.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The input dataset containing rho point coordinates ("lat_rho", "lon_rho").
+    straddle : bool
+        Indicates whether the grid straddles the Greenwich meridian. If True, longitudes are adjusted
+        to avoid discontinuities.
+
+    Returns
+    -------
+    ds : xarray.Dataset
+        The dataset with added coordinates for u and v points ("lat_u", "lon_u", "lat_v", "lon_v").
+
+    Notes
+    -----
+    This function only computes approximate latitude and longitude values. It should only be used if
+    more accurate values are not available from grid generation.
+    """
     if straddle:
         # avoid jump from 360 to 0 in interpolation
         lon_rho = xr.where(ds["lon_rho"] > 180, ds["lon_rho"] - 360, ds["lon_rho"])
@@ -1257,21 +1341,16 @@ def _add_lat_lon_at_velocity_and_vorticity_points(ds, straddle):
     lon_u = interpolate_from_rho_to_u(lon_rho)
     lat_v = interpolate_from_rho_to_v(lat_rho)
     lon_v = interpolate_from_rho_to_v(lon_rho)
-    lat_q = interpolate_from_rho_to_q(lat_rho)
-    lon_q = interpolate_from_rho_to_q(lon_rho)
 
     if straddle:
         # convert back to range [0, 360]
         lon_u = xr.where(lon_u < 0, lon_u + 360, lon_u)
         lon_v = xr.where(lon_v < 0, lon_v + 360, lon_v)
-        lon_q = xr.where(lon_q < 0, lon_q + 360, lon_q)
 
     lat_u.attrs = {"long_name": "latitude of u-points", "units": "degrees North"}
     lon_u.attrs = {"long_name": "longitude of u-points", "units": "degrees East"}
     lat_v.attrs = {"long_name": "latitude of v-points", "units": "degrees North"}
     lon_v.attrs = {"long_name": "longitude of v-points", "units": "degrees East"}
-    lat_q.attrs = {"long_name": "latitude of q-points", "units": "degrees North"}
-    lon_q.attrs = {"long_name": "longitude of q-points", "units": "degrees East"}
 
     ds = ds.assign_coords(
         {
@@ -1279,8 +1358,6 @@ def _add_lat_lon_at_velocity_and_vorticity_points(ds, straddle):
             "lon_u": lon_u,
             "lat_v": lat_v,
             "lon_v": lon_v,
-            "lat_q": lat_q,
-            "lon_q": lon_q,
         }
     )
 

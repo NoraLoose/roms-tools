@@ -162,64 +162,6 @@ def interpolate_from_rho_to_v(field, method="additive"):
     return field_interpolated
 
 
-def interpolate_from_rho_to_q(field, method="additive"):
-
-    """
-    Interpolates the given field from rho points to vorticity (q) points.
-
-    This function performs an interpolation from the rho grid (cell centers) to the q grid
-    (cell corners). Depending on the chosen method, it either averages
-    (additive) or multiplies (multiplicative) the field values between adjacent rho points.
-    It also handles the removal of unnecessary coordinate variables
-    and updates the dimensions accordingly.
-
-    Parameters
-    ----------
-    field : xr.DataArray
-        The input data array on the rho grid to be interpolated. It is assumed to have a dimension
-        named "eta_rho".
-
-    method : str, optional, default='additive'
-        The method to use for interpolation. Options are:
-        - 'additive': Average the field values between adjacent rho points.
-        - 'multiplicative': Multiply the field values between adjacent rho points. Appropriate for
-          binary masks.
-
-    Returns
-    -------
-    field_interpolated : xr.DataArray
-        The interpolated data array on the v grid with the dimension "eta_v".
-    """
-
-    if method == "additive":
-        field_interpolated = 0.25 * (
-            field
-            + field.shift(eta_rho=1)
-            + field.shift(xi_rho=1)
-            + field.shift(eta_rho=1, xi_rho=1)
-        ).isel(eta_rho=slice(1, None), xi_rho=slice(1, None))
-    elif method == "multiplicative":
-        field_interpolated = (
-            field
-            * field.shift(eta_rho=1)
-            * field.shift(xi_rho=1)
-            * field.shift(eta_rho=1, xi_rho=1)
-        ).isel(eta_rho=slice(1, None), xi_rho=slice(1, None))
-    else:
-        raise NotImplementedError(f"Unsupported method '{method}' specified.")
-
-    if "lat_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lat_rho"])
-    if "lon_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lon_rho"])
-
-    field_interpolated = field_interpolated.swap_dims(
-        {"eta_rho": "eta_v", "xi_rho": "xi_u"}
-    )
-
-    return field_interpolated
-
-
 def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray:
     """
     Extrapolate the deepest non-NaN values to the bottom along a specified dimension.
@@ -448,7 +390,11 @@ def get_variable_metadata():
     """
 
     d = {
-        "ssh_Re": {"long_name": "Tidal elevation, real part", "units": "m"},
+        "ssh_Re": {
+            "long_name": "Tidal elevation, real part",
+            "units": "m",
+            "preferred_regridding_method": "conservative",
+        },
         "ssh_Im": {"long_name": "Tidal elevation, complex part", "units": "m"},
         "pot_Re": {"long_name": "Tidal potential, real part", "units": "m"},
         "pot_Im": {"long_name": "Tidal potential, complex part", "units": "m"},

@@ -73,33 +73,49 @@ class InitialConditions(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super().get_target_lon_lat()
+        target_coords = super().get_target_coords()
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
-            straddle=straddle,
+            straddle=target_coords["straddle"],
         )
 
         vars_2d = ["zeta"]
         vars_3d = ["temp", "salt", "u", "v"]
-        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super().process_velocities(data_vars, angle, "u", "v")
+        data_vars = super().regrid_data(data, vars_2d, vars_3d, target_coords)
+        data_vars = super().process_velocities(
+            data_vars, target_coords["angle"], "u", "v"
+        )
 
         if self.bgc_source is not None:
             bgc_data = self._get_bgc_data()
             bgc_data.choose_subdomain(
-                latitude_range=[lat.min().values, lat.max().values],
-                longitude_range=[lon.min().values, lon.max().values],
+                latitude_range=[
+                    target_coords["lat"].min().values,
+                    target_coords["lat"].max().values,
+                ],
+                longitude_range=[
+                    target_coords["lon"].min().values,
+                    target_coords["lon"].max().values,
+                ],
                 margin=2,
-                straddle=straddle,
+                straddle=target_coords["straddle"],
             )
 
             vars_2d = []
             vars_3d = bgc_data.var_names.keys()
-            bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
+            bgc_data_vars = super().regrid_data(
+                bgc_data, vars_2d, vars_3d, target_coords
+            )
 
             # Ensure time coordinate matches if climatology is applied in one case but not the other
             if not self.source["climatology"] and self.bgc_source["climatology"]:
@@ -216,6 +232,8 @@ class InitialConditions(ROMSToolsMixins):
             "lon_u",
             "lat_v",
             "lon_v",
+            "lat_psi",
+            "lon_psi",
         ]
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)

@@ -86,16 +86,21 @@ class SurfaceForcing(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super().get_target_lon_lat(self.use_coarse_grid)
-        object.__setattr__(self, "target_lon", lon)
-        object.__setattr__(self, "target_lat", lat)
+        target_coords = super().get_target_coords()
+        object.__setattr__(self, "target_coords", target_coords)
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
-            straddle=straddle,
+            straddle=target_coords["straddle"],
         )
         if self.type == "physics":
             vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
@@ -103,11 +108,11 @@ class SurfaceForcing(ROMSToolsMixins):
             vars_2d = data.var_names.keys()
         vars_3d = []
 
-        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = super().regrid_data(data, vars_2d, vars_3d, target_coords)
 
         if self.type == "physics":
             data_vars = super().process_velocities(
-                data_vars, angle, "uwnd", "vwnd", interpolate=False
+                data_vars, target_coords["angle"], "uwnd", "vwnd", interpolate=False
             )
             if self.correct_radiation:
                 correction_data = self._get_correction_data()
@@ -120,7 +125,9 @@ class SurfaceForcing(ROMSToolsMixins):
                         data.dim_names["longitude"]
                     ],
                 }
-                correction_data.choose_subdomain(coords_correction, straddle=straddle)
+                correction_data.choose_subdomain(
+                    coords_correction, straddle=target_coords["straddle"]
+                )
                 # apply mask from ERA5 data
                 if "mask" in data.var_names.keys():
                     mask = xr.where(
@@ -134,7 +141,7 @@ class SurfaceForcing(ROMSToolsMixins):
                 vars_3d = []
                 # spatial interpolation
                 data_vars_corr = super().regrid_data(
-                    correction_data, vars_2d, vars_3d, lon, lat
+                    correction_data, vars_2d, vars_3d, target_coords
                 )
                 # temporal interpolation
                 corr_factor = interpolate_from_climatology(
@@ -383,7 +390,9 @@ class SurfaceForcing(ROMSToolsMixins):
         else:
             field = field.where(self.grid.ds.mask_rho)
 
-        field = field.assign_coords({"lon": self.target_lon, "lat": self.target_lat})
+        field = field.assign_coords(
+            {"lon": self.target_coords["lon"], "lat": self.target_coords["lat"]}
+        )
 
         # choose colorbar
         if varname in ["uwnd", "vwnd"]:

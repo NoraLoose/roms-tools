@@ -110,7 +110,10 @@ class TidalForcing(ROMSToolsMixins):
         )
 
         # Convert to barotropic velocity
+        regrid_methods = {}
+
         for varname in ["u_Re", "v_Re", "u_Im", "v_Im"]:
+            regrid_methods[varname] = data_vars[varname].attrs["regrid_method"]
             data_vars[varname] = data_vars[varname] / self.grid.ds.h
 
         # Interpolate from rho- to velocity points
@@ -118,6 +121,11 @@ class TidalForcing(ROMSToolsMixins):
             data_vars[uname] = interpolate_from_rho_to_u(data_vars[uname])
         for vname in ["v_Re", "v_Im"]:
             data_vars[vname] = interpolate_from_rho_to_v(data_vars[vname])
+
+        for varname in ["u_Re", "v_Re", "u_Im", "v_Im"]:
+            data_vars[varname] = data_vars[varname].assign_attrs(
+                {"regrid_method": regrid_methods[varname]}
+            )
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)

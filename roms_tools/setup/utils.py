@@ -379,130 +379,325 @@ def get_variable_metadata():
     """
     Retrieves metadata for commonly used variables in the dataset.
 
-    This function returns a dictionary containing the metadata for various variables, including long names
-    and units for each variable.
+    This function returns a dictionary containing metadata for various variables, including long names,
+    units, and the preferred regridding method for each variable.
+
+    The `preferred_regrid_method` specifies the ideal method for regridding each variable. It is
+    "conservative" for most variables. However, for vector components (e.g., velocity), "bilinear"
+    is used. Note that the "conservative" regridding method requires grid corner information.
+    If grid corner information is not available, "bilinear" is used as a fallback.
 
     Returns
     -------
     dict of str: dict
-        Dictionary where keys are variable names and values are dictionaries with "long_name" and "units" keys.
-
+        Dictionary where keys are variable names and values are dictionaries with "long_name",
+        "units", and "preferred_regrid_method" keys.
     """
 
     d = {
         "ssh_Re": {
             "long_name": "Tidal elevation, real part",
             "units": "m",
-            "preferred_regridding_method": "conservative",
+            "preferred_regrid_method": "conservative",
         },
-        "ssh_Im": {"long_name": "Tidal elevation, complex part", "units": "m"},
-        "pot_Re": {"long_name": "Tidal potential, real part", "units": "m"},
-        "pot_Im": {"long_name": "Tidal potential, complex part", "units": "m"},
+        "ssh_Im": {
+            "long_name": "Tidal elevation, complex part",
+            "units": "m",
+            "preferred_regrid_method": "conservative",
+        },
+        "pot_Re": {
+            "long_name": "Tidal potential, real part",
+            "units": "m",
+            "preferred_regrid_method": "conservative",
+        },
+        "pot_Im": {
+            "long_name": "Tidal potential, complex part",
+            "units": "m",
+            "preferred_regrid_method": "conservative",
+        },
         "u_Re": {
             "long_name": "Tidal velocity in x-direction, real part",
             "units": "m/s",
+            "preferred_regrid_method": "bilinear",
         },
         "u_Im": {
             "long_name": "Tidal velocity in x-direction, complex part",
             "units": "m/s",
+            "preferred_regrid_method": "bilinear",
         },
         "v_Re": {
             "long_name": "Tidal velocity in y-direction, real part",
             "units": "m/s",
+            "preferred_regrid_method": "bilinear",
         },
         "v_Im": {
             "long_name": "Tidal velocity in y-direction, complex part",
             "units": "m/s",
+            "preferred_regrid_method": "bilinear",
         },
-        "uwnd": {"long_name": "10 meter wind in x-direction", "units": "m/s"},
-        "vwnd": {"long_name": "10 meter wind in y-direction", "units": "m/s"},
+        "uwnd": {
+            "long_name": "10 meter wind in x-direction",
+            "units": "m/s",
+            "preferred_regrid_method": "bilinear",
+        },
+        "vwnd": {
+            "long_name": "10 meter wind in y-direction",
+            "units": "m/s",
+            "preferred_regrid_method": "bilinear",
+        },
         "swrad": {
             "long_name": "downward short-wave (solar) radiation",
             "units": "W/m^2",
+            "preferred_regrid_method": "conservative",
         },
+        "swr_corr": {"preferred_regrid_method": "conservative"},
         "lwrad": {
             "long_name": "downward long-wave (thermal) radiation",
             "units": "W/m^2",
+            "preferred_regrid_method": "conservative",
         },
-        "Tair": {"long_name": "air temperature at 2m", "units": "degrees Celsius"},
-        "qair": {"long_name": "absolute humidity at 2m", "units": "kg/kg"},
-        "rain": {"long_name": "total precipitation", "units": "cm/day"},
-        "temp": {"long_name": "potential temperature", "units": "degrees Celsius"},
-        "salt": {"long_name": "salinity", "units": "PSU"},
-        "zeta": {"long_name": "sea surface height", "units": "m"},
-        "u": {"long_name": "u-flux component", "units": "m/s"},
-        "v": {"long_name": "v-flux component", "units": "m/s"},
-        "w": {"long_name": "w-flux component", "units": "m/s"},
+        "Tair": {
+            "long_name": "air temperature at 2m",
+            "units": "degrees Celsius",
+            "preferred_regrid_method": "conservative",
+        },
+        "qair": {
+            "long_name": "absolute humidity at 2m",
+            "units": "kg/kg",
+            "preferred_regrid_method": "conservative",
+        },
+        "rain": {
+            "long_name": "total precipitation",
+            "units": "cm/day",
+            "preferred_regrid_method": "conservative",
+        },
+        "temp": {
+            "long_name": "potential temperature",
+            "units": "degrees Celsius",
+            "preferred_regrid_method": "conservative",
+        },
+        "salt": {
+            "long_name": "salinity",
+            "units": "PSU",
+            "preferred_regrid_method": "conservative",
+        },
+        "zeta": {
+            "long_name": "sea surface height",
+            "units": "m",
+            "preferred_regrid_method": "conservative",
+        },
+        "u": {
+            "long_name": "u-flux component",
+            "units": "m/s",
+            "preferred_regrid_method": "bilinear",
+        },
+        "v": {
+            "long_name": "v-flux component",
+            "units": "m/s",
+            "preferred_regrid_method": "bilinear",
+        },
+        "w": {
+            "long_name": "w-flux component",
+            "units": "m/s",
+        },  # never interpolated, instead set to 0
         "ubar": {
             "long_name": "vertically integrated u-flux component",
             "units": "m/s",
-        },
+        },  # never interpolated, instead inferred from u
         "vbar": {
             "long_name": "vertically integrated v-flux component",
             "units": "m/s",
+        },  # never interpolated, instead inferred from v
+        "PO4": {
+            "long_name": "dissolved inorganic phosphate",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
         },
-        "PO4": {"long_name": "dissolved inorganic phosphate", "units": "mmol/m^3"},
-        "NO3": {"long_name": "dissolved inorganic nitrate", "units": "mmol/m^3"},
-        "SiO3": {"long_name": "dissolved inorganic silicate", "units": "mmol/m^3"},
-        "NH4": {"long_name": "dissolved ammonia", "units": "mmol/m^3"},
-        "Fe": {"long_name": "dissolved inorganic iron", "units": "mmol/m^3"},
-        "Lig": {"long_name": "iron binding ligand", "units": "mmol/m^3"},
-        "O2": {"long_name": "dissolved oxygen", "units": "mmol/m^3"},
-        "DIC": {"long_name": "dissolved inorganic carbon", "units": "mmol/m^3"},
+        "NO3": {
+            "long_name": "dissolved inorganic nitrate",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "SiO3": {
+            "long_name": "dissolved inorganic silicate",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "NH4": {
+            "long_name": "dissolved ammonia",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "Fe": {
+            "long_name": "dissolved inorganic iron",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "Lig": {
+            "long_name": "iron binding ligand",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "O2": {
+            "long_name": "dissolved oxygen",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "DIC": {
+            "long_name": "dissolved inorganic carbon",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
         "DIC_ALT_CO2": {
             "long_name": "dissolved inorganic carbon, alternative CO2",
             "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
         },
-        "ALK": {"long_name": "alkalinity", "units": "meq/m^3"},
+        "ALK": {
+            "long_name": "alkalinity",
+            "units": "meq/m^3",
+            "preferred_regrid_method": "conservative",
+        },
         "ALK_ALT_CO2": {
             "long_name": "alkalinity, alternative CO2",
             "units": "meq/m^3",
+            "preferred_regrid_method": "conservative",
         },
-        "DOC": {"long_name": "dissolved organic carbon", "units": "mmol/m^3"},
-        "DON": {"long_name": "dissolved organic nitrogen", "units": "mmol/m^3"},
-        "DOP": {"long_name": "dissolved organic phosphorus", "units": "mmol/m^3"},
+        "DOC": {
+            "long_name": "dissolved organic carbon",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "DON": {
+            "long_name": "dissolved organic nitrogen",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "DOP": {
+            "long_name": "dissolved organic phosphorus",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
         "DOCr": {
             "long_name": "refractory dissolved organic carbon",
             "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
         },
         "DONr": {
             "long_name": "refractory dissolved organic nitrogen",
             "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
         },
         "DOPr": {
             "long_name": "refractory dissolved organic phosphorus",
             "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
         },
-        "zooC": {"long_name": "zooplankton carbon", "units": "mmol/m^3"},
+        "zooC": {
+            "long_name": "zooplankton carbon",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
         "spChl": {
             "long_name": "small phytoplankton chlorophyll",
             "units": "mg/m^3",
+            "preferred_regrid_method": "conservative",
         },
-        "spC": {"long_name": "small phytoplankton carbon", "units": "mmol/m^3"},
+        "spC": {
+            "long_name": "small phytoplankton carbon",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
         "spP": {
             "long_name": "small phytoplankton phosphorous",
             "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
         },
-        "spFe": {"long_name": "small phytoplankton iron", "units": "mmol/m^3"},
-        "spCaCO3": {"long_name": "small phytoplankton CaCO3", "units": "mmol/m^3"},
-        "diatChl": {"long_name": "diatom chloropyll", "units": "mg/m^3"},
-        "diatC": {"long_name": "diatom carbon", "units": "mmol/m^3"},
-        "diatP": {"long_name": "diatom phosphorus", "units": "mmol/m^3"},
-        "diatFe": {"long_name": "diatom iron", "units": "mmol/m^3"},
-        "diatSi": {"long_name": "diatom silicate", "units": "mmol/m^3"},
-        "diazChl": {"long_name": "diazotroph chloropyll", "units": "mg/m^3"},
-        "diazC": {"long_name": "diazotroph carbon", "units": "mmol/m^3"},
-        "diazP": {"long_name": "diazotroph phosphorus", "units": "mmol/m^3"},
-        "diazFe": {"long_name": "diazotroph iron", "units": "mmol/m^3"},
-        "pco2_air": {"long_name": "atmospheric pCO2", "units": "ppmv"},
+        "spFe": {
+            "long_name": "small phytoplankton iron",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "spCaCO3": {
+            "long_name": "small phytoplankton CaCO3",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "diatChl": {
+            "long_name": "diatom chloropyll",
+            "units": "mg/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "diatC": {
+            "long_name": "diatom carbon",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "diatP": {
+            "long_name": "diatom phosphorus",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "diatFe": {
+            "long_name": "diatom iron",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "diatSi": {
+            "long_name": "diatom silicate",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "diazChl": {
+            "long_name": "diazotroph chloropyll",
+            "units": "mg/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "diazC": {
+            "long_name": "diazotroph carbon",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "diazP": {
+            "long_name": "diazotroph phosphorus",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "diazFe": {
+            "long_name": "diazotroph iron",
+            "units": "mmol/m^3",
+            "preferred_regrid_method": "conservative",
+        },
+        "pco2_air": {
+            "long_name": "atmospheric pCO2",
+            "units": "ppmv",
+            "preferred_regrid_method": "conservative",
+        },
         "pco2_air_alt": {
             "long_name": "atmospheric pCO2, alternative CO2",
             "units": "ppmv",
+            "preferred_regrid_method": "conservative",
         },
-        "iron": {"long_name": "iron decomposition", "units": "nmol/cm^2/s"},
-        "dust": {"long_name": "dust decomposition", "units": "kg/m^2/s"},
-        "nox": {"long_name": "NOx decomposition", "units": "kg/m^2/s"},
-        "nhy": {"long_name": "NHy decomposition", "units": "kg/m^2/s"},
+        "iron": {
+            "long_name": "iron decomposition",
+            "units": "nmol/cm^2/s",
+            "preferred_regrid_method": "conservative",
+        },
+        "dust": {
+            "long_name": "dust decomposition",
+            "units": "kg/m^2/s",
+            "preferred_regrid_method": "conservative",
+        },
+        "nox": {
+            "long_name": "NOx decomposition",
+            "units": "kg/m^2/s",
+            "preferred_regrid_method": "conservative",
+        },
+        "nhy": {
+            "long_name": "NHy decomposition",
+            "units": "kg/m^2/s",
+            "preferred_regrid_method": "conservative",
+        },
     }
     return d
 

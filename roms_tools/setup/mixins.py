@@ -5,6 +5,7 @@ from roms_tools.setup.utils import (
     extrapolate_deepest_to_bottom,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    get_variable_metadata,
 )
 import xarray as xr
 import numpy as np
@@ -41,38 +42,33 @@ class ROMSToolsMixins:
             Dictionary containing the longitude, latitude, and angle arrays, along with a boolean indicating
             if the grid straddles the meridian.
         """
-
+        # Select grid variables based on whether the coarse grid is used
         if use_coarse_grid:
-            lat = self.grid.ds.lat_coarse
-            lon = self.grid.ds.lon_coarse
-            angle = self.grid.ds.angle_coarse
-            if "lat_psi_coarse" in self.grid.ds and "lon_psi_coarse" in self.grid.ds:
-                lat_psi = self.grid.ds.lat_psi_coarse
-                lon_psi = self.grid.ds.lon_psi_coarse
-            else:
-                # corner points not available
-                lat_psi = None
-                lon_psi = None
+            lat, lon, angle = (
+                self.grid.ds.lat_coarse,
+                self.grid.ds.lon_coarse,
+                self.grid.ds.angle_coarse,
+            )
+            lat_psi = self.grid.ds.get("lat_psi_coarse")
+            lon_psi = self.grid.ds.get("lon_psi_coarse")
         else:
-            lat = self.grid.ds.lat_rho
-            lon = self.grid.ds.lon_rho
-            angle = self.grid.ds.angle
-            if "lat_psi" in self.grid.ds and "lon_psi" in self.grid.ds:
-                lat_psi = self.grid.ds.lat_psi
-                lon_psi = self.grid.ds.lon_psi
-            else:
-                # corner points not available
-                lat_psi = None
-                lon_psi = None
+            lat, lon, angle = (
+                self.grid.ds.lat_rho,
+                self.grid.ds.lon_rho,
+                self.grid.ds.angle,
+            )
+            lat_psi = self.grid.ds.get("lat_psi")
+            lon_psi = self.grid.ds.get("lon_psi")
 
-        # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
+        # Operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
-        if lon_psi:
+        if lon_psi is not None:
             lon_psi = xr.where(lon_psi > 180, lon_psi - 360, lon_psi)
+
         straddle = True
         if not self.grid.straddle and abs(lon).min() > 5:
             lon = xr.where(lon < 0, lon + 360, lon)
-            if lon_psi:
+            if lon_psi is not None:
                 lon_psi = xr.where(lon_psi < 0, lon_psi + 360, lon_psi)
             straddle = False
 
@@ -125,47 +121,46 @@ class ROMSToolsMixins:
 
         # interpolate onto desired grid
         data_vars = {}
-        fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
 
         ds_in, ds_out, corners_available = prepare_xesmf_regridding(data, target_coords)
 
+        fill_dims = ["nlat", "nlon"]
+
+        d_meta = get_variable_metadata()
+
         # 2d interpolation
-        if vars_2d:
-            if corners_available:
-                conservative_regridder = xesmf.Regridder(
-                    ds_in, ds_out, method="conservative"
+        regridders = {}
+        for var in vars_2d:
+
+            # propagate ocean values into land areas
+            if "time" in data.dim_names:
+                mask = xr.where(
+                    data.ds[data.var_names[var]]
+                    .isel({data.dim_names["time"]: 0})
+                    .isnull(),
+                    0,
+                    1,
                 )
             else:
-                bilinear_regridder = xesmf.Regridder(ds_in, ds_out, method="bilinear")
+                mask = xr.where(data.ds[data.var_names[var]].isnull(), 0, 1)
 
-            if "uwnd" in vars_2d or "vwnd" in vars_2d and not bilinear_regridder:
-                bilinear_regridder = xesmf.Regridder(ds_in, ds_out, method="bilinear")
+            data.ds[data.var_names[var]] = lateral_fill(
+                data.ds[data.var_names[var]].astype(np.float64).where(mask),
+                1 - mask,
+                dims=fill_dims,
+            )
 
-            for var in vars_2d:
-                if "time" in data.dim_names:
-                    mask = xr.where(
-                        data.ds[data.var_names[var]]
-                        .isel({data.dim_names["time"]: 0})
-                        .isnull(),
-                        0,
-                        1,
-                    )
-                else:
-                    mask = xr.where(data.ds[data.var_names[var]].isnull(), 0, 1)
+            # regrid
+            method = d_meta[var]["preferred_regrid_method"]
 
-                # propagate ocean values into land areas
-                data.ds[data.var_names[var]] = lateral_fill(
-                    data.ds[data.var_names[var]].astype(np.float64).where(mask),
-                    1 - mask,
-                    dims=fill_dims,
-                )
+            if method == "conservative" and not corners_available:
+                method = "bilinear"
 
-                if var in ["uwnd", "vwnd"]:
-                    data_vars[var] = bilinear_regridder(data.ds[data.var_names[var]])
-                else:
-                    data_vars[var] = conservative_regridder(
-                        data.ds[data.var_names[var]]
-                    )
+            if method not in regridders:
+                regridders[method] = xesmf.Regridder(ds_in, ds_out, method=method)
+
+            regridder = regridders[method]
+            data_vars[var] = regridder(data.ds[data.var_names[var]])
 
         # 3d interpolation
         if vars_3d:
@@ -173,13 +168,14 @@ class ROMSToolsMixins:
             ds_in["depth"] = data.ds[data.dim_names["depth"]]
             ds_out["layer_depth_rho"] = self.grid.ds["layer_depth_rho"]
 
-            regrid_conservative = xesmf.Regridder(ds_in, ds_out, method="conservative")
+            regridders = {}
 
-            # extrapolate deepest value all the way to bottom ("flooding")
             for var in vars_3d:
+                # extrapolate deepest value all the way to bottom ("flooding")
                 data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
                     data.ds[data.var_names[var]], data.dim_names["depth"]
                 )
+                # propagate ocean values into land areas
                 if "time" in data.dim_names:
                     mask = xr.where(
                         data.ds[data.var_names[var]]
@@ -191,15 +187,23 @@ class ROMSToolsMixins:
                 else:
                     mask = xr.where(data.ds[data.var_names[var]].isnull(), 0, 1)
 
-                # propagate ocean values into land areas
                 data.ds[data.var_names[var]] = lateral_fill(
                     data.ds[data.var_names[var]].astype(np.float64).where(mask),
                     1 - mask,
                     dims=fill_dims,
                 )
 
-                # interpolate
-                data_vars[var] = regrid_conservative(data.ds[data.var_names[var]])
+                # regrid
+                method = d_meta[var]["preferred_regrid_method"]
+
+                if method == "conservative" and not corners_available:
+                    method = "bilinear"
+
+                if method not in regridders:
+                    regridders[method] = xesmf.Regridder(ds_in, ds_out, method=method)
+
+                regridder = regridders[method]
+                data_vars[var] = regridder(data.ds[data.var_names[var]])
 
                 # transpose to correct order (time, s_rho, eta_rho, xi_rho)
                 data_vars[var] = data_vars[var].transpose(
@@ -246,6 +250,9 @@ class ROMSToolsMixins:
             dimension), the dictionary also includes the barotropic (depth-averaged) velocities (`ubar` and `vbar`).
         """
 
+        regrid_method_u = data_vars[uname].attrs["regrid_method"]
+        regrid_method_v = data_vars[vname].attrs["regrid_method"]
+
         # Rotate velocities to grid orientation
         u_rot = data_vars[uname] * np.cos(angle) + data_vars[vname] * np.sin(angle)
         v_rot = data_vars[vname] * np.cos(angle) - data_vars[uname] * np.sin(angle)
@@ -257,6 +264,13 @@ class ROMSToolsMixins:
         else:
             data_vars[uname] = u_rot
             data_vars[vname] = v_rot
+
+        data_vars[uname] = data_vars[uname].assign_attrs(
+            {"regrid_method": regrid_method_u}
+        )
+        data_vars[vname] = data_vars[vname].assign_attrs(
+            {"regrid_method": regrid_method_v}
+        )
 
         if "s_rho" in data_vars[uname].dims and "s_rho" in data_vars[vname].dims:
             # Compute barotropic velocity
@@ -277,42 +291,56 @@ class ROMSToolsMixins:
 
 def prepare_xesmf_regridding(data, target_coords):
 
+    # output grid
+    ds_out = xr.Dataset()
+    ds_out["lon"] = target_coords["lon"]
+    ds_out["lat"] = target_coords["lat"]
+
+    # Assign bounding coordinates if corners are available
+    corners_available = (
+        target_coords["lon_psi"] is not None and target_coords["lat_psi"] is not None
+    )
+    if corners_available:
+        ds_out["lon_b"] = target_coords["lon_psi"]
+        ds_out["lat_b"] = target_coords["lat_psi"]
+
+    # input grid
     ds_in = xr.Dataset()
 
     lon = data.ds[data.dim_names["longitude"]]
     lat = data.ds[data.dim_names["latitude"]]
 
-    lon_centers, lat_centers = np.meshgrid(lon, lat)
-
-    # compute corner points
-
-    lon_corners = 0.25 * (
-        lon_centers[:-1, :-1]
-        + lon_centers[1:, :-1]
-        + lon_centers[:-1, 1:]
-        + lon_centers[1:, 1:]
-    )
-
-    lat_corners = 0.25 * (
-        lat_centers[:-1, :-1]
-        + lat_centers[1:, :-1]
-        + lat_centers[:-1, 1:]
-        + lat_centers[1:, 1:]
-    )
-
-    ds_in["lon"] = xr.DataArray(data=lon_centers, dims=("lat", "lon"))
-    ds_in["lat"] = xr.DataArray(data=lat_centers, dims=("lat", "lon"))
-    ds_in["lon_b"] = xr.DataArray(data=lon_corners, dims=("lat_b", "lon_b"))
-    ds_in["lat_b"] = xr.DataArray(data=lat_corners, dims=("lat_b", "lon_b"))
-
-    ds_out = xr.Dataset()
-    ds_out["lon"] = target_coords["lon"]
-    ds_out["lat"] = target_coords["lat"]
-    if target_coords["lon_psi"] and target_coords["lat_psi"]:
-        ds_out["lon_b"] = target_coords["lon_psi"]
-        ds_out["lat_b"] = target_coords["lat_psi"]
-        corners_available = True
+    if corners_available:
+        # compute corner points
+        lon_b = 0.5 * (lon + lon.shift({data.dim_names["longitude"]: 1})).isel(
+            {data.dim_names["longitude"]: slice(1, None)}
+        ).rename({data.dim_names["longitude"]: "nlon_b"})
+        lat_b = 0.5 * (lat + lat.shift({data.dim_names["latitude"]: 1})).isel(
+            {data.dim_names["latitude"]: slice(1, None)}
+        ).rename({data.dim_names["latitude"]: "nlat_b"})
+        ds_in["lon_b"] = lon_b
+        ds_in["lat_b"] = lat_b
+        # cut off first and last cell center to make consistent with available corner points
+        ds_in["lon"] = lon.isel({data.dim_names["longitude"]: slice(1, -1)}).rename(
+            {data.dim_names["longitude"]: "nlon"}
+        )
+        ds_in["lat"] = lat.isel({data.dim_names["latitude"]: slice(1, -1)}).rename(
+            {data.dim_names["latitude"]: "nlat"}
+        )
+        ds = data.ds.isel(
+            {
+                data.dim_names["longitude"]: slice(1, -1),
+                data.dim_names["latitude"]: slice(1, -1),
+            }
+        )
+        object.__setattr__(data, "ds", ds)
     else:
-        corners_available = False
+        ds_in["lon"] = lon.rename({data.dim_names["longitude"]: "nlon"})
+        ds_in["lat"] = lat.rename({data.dim_names["latitude"]: "nlat"})
+
+    ds = data.ds.rename(
+        {data.dim_names["longitude"]: "nlon", data.dim_names["latitude"]: "nlat"}
+    )
+    object.__setattr__(data, "ds", ds)
 
     return ds_in, ds_out, corners_available

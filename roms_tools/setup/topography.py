@@ -7,7 +7,6 @@ from roms_tools.setup.download import fetch_topo
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
-    interpolate_from_rho_to_q,
 )
 import warnings
 from itertools import count
@@ -287,12 +286,8 @@ def _add_velocity_masks(ds):
     ds["mask_v"] = interpolate_from_rho_to_v(
         ds["mask_rho"], method="multiplicative"
     ).astype(np.int32)
-    ds["mask_q"] = interpolate_from_rho_to_q(
-        ds["mask_rho"], method="multiplicative"
-    ).astype(np.int32)
 
     ds["mask_u"].attrs = {"long_name": "Mask at u-points", "units": "land/water (0/1)"}
     ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}
-    ds["mask_q"].attrs = {"long_name": "Mask at q-points", "units": "land/water (0/1)"}
 
     return ds

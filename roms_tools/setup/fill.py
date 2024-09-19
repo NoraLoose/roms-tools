@@ -29,18 +29,18 @@ def lateral_fill(var, dims=["latitude", "longitude"], method="sor"):
 
     """
 
-    var_filled = xr.apply_ufunc(
+    var_filled, iter_cnt = xr.apply_ufunc(
         _lateral_fill_np_array,
         var,
         input_core_dims=[dims],
-        output_core_dims=[dims],
-        output_dtypes=[var.dtype],
+        output_core_dims=[dims, []],
+        output_dtypes=[var.dtype, np.int32],
         dask="parallelized",
         vectorize=True,
         kwargs={"method": method},
     )
 
-    return var_filled
+    return var_filled, iter_cnt
 
 
 def _lateral_fill_np_array(var, method, fillvalue=0.0):
@@ -80,23 +80,23 @@ def _lateral_fill_np_array(var, method, fillvalue=0.0):
     """
 
     fillmask = np.isnan(var)  # fill all NaNs
+    var = var.copy()
 
     if method == "sor":
         nlat, nlon = var.shape[-2:]
-        var = var.copy()
-        var = _iterative_fill_sor(nlat, nlon, var, fillmask, fillvalue)
+        var, iter_cnt = _iterative_fill_sor(nlat, nlon, var, fillmask, fillvalue)
 
     elif method == "kara":
 
         var[np.isnan(var)] = 1e15
-        var = flood_kara_raw(var, fillmask)
+        var, iter_cnt = flood_kara_raw(var, fillmask)
 
-    return var
+    return var, iter_cnt
 
 
 @jit(nopython=True, parallel=True)
 def _iterative_fill_sor(
-    nlat, nlon, var, fillmask, tol=1.0e-4, rc=1.8, max_iter=10000, fillvalue=0.0
+    nlat, nlon, var, fillmask, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000
 ):
     """
     Perform an iterative land fill algorithm using the Successive Over-Relaxation (SOR)
@@ -116,6 +116,9 @@ def _iterative_fill_sor(
     fillmask : numpy.array, boolean
         Mask indicating positions to be filled: `True` where data should be filled.
 
+    fillvalue: float
+        Value to use if the full field is NaNs. Default is 0.0.
+
     tol : float, optional, default=1.0e-4
         Convergence criteria: stop filling when the value change is less than
         or equal to `tol * var`, i.e., `delta <= tol * np.abs(var[j, i])`.
@@ -134,9 +137,6 @@ def _iterative_fill_sor(
     max_iter : int, optional, default=10000
         Maximum number of iterations to perform before giving up if the tolerance
         is not reached.
-
-    fillvalue: float
-        Value to use if the full field is NaNs. Default is 0.0.
 
     Returns
     -------
@@ -166,11 +166,11 @@ def _iterative_fill_sor(
     # Note: this will happen for shortwave downward radiation at night time
     if np.max(np.fabs(var)) == 0.0:
         var = np.zeros_like(var)
-        return var
+        return var, 0
     # If field consists only of NaNs, fill NaNs with fill value
     if np.isnan(var).all():
         var = fillvalue * np.ones_like(var)
-        return var
+        return var, 0
 
     # Compute a zonal mean to use as a first guess
     zoncnt = np.zeros(nlat)
@@ -275,8 +275,9 @@ def _iterative_fill_sor(
 
         res_max = np.max(np.fabs(res)) / np.max(np.fabs(var))
         iter_cnt += 1
+    print(iter_cnt)
 
-    return var
+    return var, iter_cnt
 
 
 @jit(nopython=True, parallel=True)
@@ -320,11 +321,11 @@ def flood_kara_raw(field, mask, nmax=1000, fillvalue=0.0):
     # Note: this will happen for shortwave downward radiation at night time
     if np.max(np.fabs(field)) == 0.0:
         field = np.zeros_like(field)
-        return field
+        return field, 0
     # If field consists only of NaNs, fill NaNs with fill value
     if np.isnan(field).all():
         field = fillvalue * np.ones_like(field)
-        return field
+        return field, 0
 
     ny, nx = field.shape
     nxy = nx * ny
@@ -390,5 +391,6 @@ def flood_kara_raw(field, mask, nmax=1000, fillvalue=0.0):
             )
 
     drowned = ztmp[1:-1, 1:-1]
+    print(nt)
 
-    return drowned
+    return drowned, nt

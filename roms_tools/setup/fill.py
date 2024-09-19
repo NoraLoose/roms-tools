@@ -3,7 +3,7 @@ import xarray as xr
 from numba import jit
 
 
-def lateral_fill(var, dims=["latitude", "longitude"], fillvalue=0.0):
+def lateral_fill(var, dims=["latitude", "longitude"], fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000):
     """
     Fills all NaN values in an xarray DataArray via a lateral fill, while leaving existing non-NaN values unchanged.
 
@@ -27,18 +27,18 @@ def lateral_fill(var, dims=["latitude", "longitude"], fillvalue=0.0):
 
     """
 
-    var_filled = xr.apply_ufunc(
+    var_filled, iter_cnt = xr.apply_ufunc(
         _lateral_fill_np_array,
         var,
         input_core_dims=[dims],
-        output_core_dims=[dims],
-        output_dtypes=[var.dtype],
+        output_core_dims=[dims, []],
+        output_dtypes=[var.dtype, np.int32],
         dask="parallelized",
         vectorize=True,
-        kwargs={"fillvalue": fillvalue},
+        kwargs={"fillvalue": fillvalue, "tol": tol, "rc": rc, "max_iter": max_iter},
     )
 
-    return var_filled
+    return var_filled, iter_cnt
 
 
 def _lateral_fill_np_array(var, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000):
@@ -87,9 +87,9 @@ def _lateral_fill_np_array(var, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=1000
     var = var.copy()
 
     fillmask = np.isnan(var)  # Fill all NaNs
-    var = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue)
+    var, iter_cnt = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue)
 
-    return var
+    return var, iter_cnt
 
 
 @jit(nopython=True, parallel=True)
@@ -153,11 +153,11 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=
     # Note: this will happen for shortwave downward radiation at night time
     if np.max(np.fabs(var)) == 0.0:
         var = np.zeros_like(var)
-        return var
+        return var, 0
     # If field consists only of NaNs, fill NaNs with fill value
     if np.isnan(var).all():
         var = fillvalue * np.ones_like(var)
-        return var
+        return var, 0
 
     # Compute a zonal mean to use as a first guess
     zoncnt = np.zeros(nlat)
@@ -263,4 +263,5 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=
         res_max = np.max(np.fabs(res)) / np.max(np.fabs(var))
         iter_cnt += 1
 
-    return var
+    print(iter_cnt)
+    return var, iter_cnt

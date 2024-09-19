@@ -3,7 +3,7 @@ import xarray as xr
 from numba import jit
 
 
-def lateral_fill(var, dims=["latitude", "longitude"], fillvalue=0.0):
+def lateral_fill(var, dims=["latitude", "longitude"], method="sor"):
     """
     Fills all NaN values in an xarray DataArray via a lateral fill, while leaving existing non-NaN values unchanged.
 
@@ -16,8 +16,10 @@ def lateral_fill(var, dims=["latitude", "longitude"], fillvalue=0.0):
     dims : list of str, optional, default=['latitude', 'longitude']
         Dimensions along which to perform the fill. The default is ['latitude', 'longitude'].
 
-    fillvalue : float, optional, default=0.0
-        Value to use if an entire data slice along the dims contains only NaNs.
+    method : str
+        The fill method to use. Options are:
+        - "sor": Successive Over-Relaxation (SOR) method.
+        - "kara": Kara et al. extrapolation method.
 
     Returns
     -------
@@ -35,65 +37,67 @@ def lateral_fill(var, dims=["latitude", "longitude"], fillvalue=0.0):
         output_dtypes=[var.dtype],
         dask="parallelized",
         vectorize=True,
-        kwargs={"fillvalue": fillvalue},
+        kwargs={"method": method},
     )
 
     return var_filled
 
 
-def _lateral_fill_np_array(var, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000):
+def _lateral_fill_np_array(var, method, fillvalue=0.0):
     """
-    Fills all NaN values in a NumPy array via a lateral fill, while leaving existing non-NaN values unchanged.
+    Fill NaN values in a NumPy array laterally using the specified method, while leaving
+    existing non-NaN values unchanged.
 
     Parameters
     ----------
-    var : numpy.array
-        Two-dimensional array on which to fill NaNs.Only NaNs where `isvalid_mask` is
-        True will be filled.
-
-    fillvalue: float
-        Value to use if the full field `var` contains only  NaNs. Default is 0.0.
-
-    tol : float, optional, default=1.0e-4
-        Convergence criteria: stop filling when the value change is less than
-        or equal to `tol * var`, i.e., `delta <= tol * np.abs(var[j, i])`.
-
-    rc : float, optional, default=1.8
-        Over-relaxation coefficient to use in the Successive Over-Relaxation (SOR)
-        fill algorithm. Larger arrays (or extent of region to be filled if not global)
-        typically converge faster with larger coefficients. For completely
-        land-filling a 1-degree grid (360x180), a coefficient in the range 1.85-1.9
-        is near optimal. Valid bounds are (1.0, 2.0).
-
-    max_iter : int, optional, default=10000
-        Maximum number of iterations to perform before giving up if the tolerance
-        is not reached.
+    var : np.ndarray
+        A two-dimensional array in which to fill NaN values. Only NaNs in valid regions
+        (determined by the `fillmask`) will be filled.
+    method : str
+        The fill method to use. Options are:
+        - "sor": Successive Over-Relaxation (SOR) method.
+        - "kara": Kara et al. extrapolation method.
+    fillvalue : float, optional
+        The value to use if the entire array contains only NaNs. Default is 0.0.
 
     Returns
     -------
-    var : numpy.array
-        Array with NaNs filled by iterative smoothing, except for the regions
-        specified by `isvalid_mask` where NaNs are preserved.
+    np.ndarray
+        The array with NaN values filled according to the specified method.
 
-
-    Example
-    -------
+    Examples
+    --------
     >>> import numpy as np
     >>> var = np.array([[1, 2, np.nan], [4, np.nan, 6]])
-    >>> filled_var = lateral_fill_np_array(var)
+    >>> filled_var = _lateral_fill_np_array(var, method="sor")
     >>> print(filled_var)
-    """
-    nlat, nlon = var.shape[-2:]
-    var = var.copy()
 
-    fillmask = np.isnan(var)  # Fill all NaNs
-    var = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue)
+    Notes
+    -----
+    - The "sor" method applies the Successive Over-Relaxation technique to fill missing values.
+    - The "kara" method uses the approach described by Kara et al.
+      (https://doi.org/10.1175/JPO2984.1) for extrapolating values over masked regions.
+    """
+
+    fillmask = np.isnan(var)  # fill all NaNs
+
+    if method == "sor":
+        nlat, nlon = var.shape[-2:]
+        var = var.copy()
+        var = _iterative_fill_sor(nlat, nlon, var, fillmask, fillvalue)
+
+    elif method == "kara":
+
+        var[np.isnan(var)] = 1e15
+        var = flood_kara_raw(var, fillmask)
 
     return var
 
 
 @jit(nopython=True, parallel=True)
-def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=0.0):
+def _iterative_fill_sor(
+    nlat, nlon, var, fillmask, tol=1.0e-4, rc=1.8, max_iter=10000, fillvalue=0.0
+):
     """
     Perform an iterative land fill algorithm using the Successive Over-Relaxation (SOR)
     solution of the Laplace Equation.
@@ -112,15 +116,24 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=
     fillmask : numpy.array, boolean
         Mask indicating positions to be filled: `True` where data should be filled.
 
-    tol : float
-        Convergence criterion: the iterative process stops when the maximum residual change
-        is less than or equal to `tol`.
+    tol : float, optional, default=1.0e-4
+        Convergence criteria: stop filling when the value change is less than
+        or equal to `tol * var`, i.e., `delta <= tol * np.abs(var[j, i])`.
 
-    rc : float
-        Over-relaxation coefficient used in the SOR algorithm. Must be between 1.0 and 2.0.
+    rc : float, optional, default=1.8
+        Over-relaxation coefficient to use in the Successive Over-Relaxation (SOR)
+        fill algorithm. Larger arrays (or extent of region to be filled if not global)
+        typically converge faster with larger coefficients. For completely
+        land-filling a 1-degree grid (360x180), a coefficient in the range 1.85-1.9
+        is near optimal. Valid bounds are (1.0, 2.0).
 
-    max_iter : int
-        Maximum number of iterations allowed before the process is terminated.
+    max_iter : int, optional, default=10000
+        Maximum number of iterations to perform before giving up if the tolerance
+        is not reached.
+
+    max_iter : int, optional, default=10000
+        Maximum number of iterations to perform before giving up if the tolerance
+        is not reached.
 
     fillvalue: float
         Value to use if the full field is NaNs. Default is 0.0.
@@ -264,3 +277,118 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=
         iter_cnt += 1
 
     return var
+
+
+@jit(nopython=True, parallel=True)
+def flood_kara_raw(field, mask, nmax=1000, fillvalue=0.0):
+    """
+    Extrapolate land values onto land using the Kara method.
+
+    This function applies the method described by Kara et al.
+    (https://doi.org/10.1175/JPO2984.1) to extrapolate values over land
+    based on a binary land/sea mask.
+
+    Parameters
+    ----------
+    field : np.ndarray
+        The input field array to extrapolate, where NaN values represent
+        areas to be filled.
+    mask : np.ndarray
+        A binary mask where 1 represents sea and 0 represents land.
+    nmax : int, optional
+        Maximum number of iterations for the extrapolation process,
+        by default 1000.
+    fillvalue : float, optional
+        The value to use if the entire field consists of NaNs.
+        Default is 0.0.
+
+    Returns
+    -------
+    np.ndarray
+        The field after extrapolation with NaN values replaced by
+        extrapolated land values.
+
+    Notes
+    -----
+    The Kara method uses an iterative extrapolation technique to fill
+    in values over land areas. This method can be useful in oceanographic
+    applications where missing data in land regions needs to be
+    extrapolated from adjacent sea values.
+    """
+
+    # If field consists only of zeros, fill NaNs in with zeros and all done
+    # Note: this will happen for shortwave downward radiation at night time
+    if np.max(np.fabs(field)) == 0.0:
+        field = np.zeros_like(field)
+        return field
+    # If field consists only of NaNs, fill NaNs with fill value
+    if np.isnan(field).all():
+        field = fillvalue * np.ones_like(field)
+        return field
+
+    ny, nx = field.shape
+    nxy = nx * ny
+    # create fields with halos
+    ztmp = np.zeros((ny + 2, nx + 2))
+    zmask = np.zeros((ny + 2, nx + 2))
+    # init the values
+    ztmp[1:-1, 1:-1] = field.copy()
+    zmask[1:-1, 1:-1] = mask.copy()
+
+    ztmp_new = ztmp.copy()
+    zmask_new = zmask.copy()
+    #
+    nt = 0
+    while (zmask[1:-1, 1:-1].sum() < nxy) and (nt < nmax):
+        for jj in np.arange(1, ny + 1):
+            for ji in np.arange(1, nx + 1):
+
+                # compute once those indexes
+                jjm1 = jj - 1
+                jjp1 = jj + 1
+                jim1 = ji - 1
+                jip1 = ji + 1
+
+                if zmask[jj, ji] == 0:
+                    c6 = 1 * zmask[jjm1, jim1]
+                    c7 = 2 * zmask[jjm1, ji]
+                    c8 = 1 * zmask[jjm1, jip1]
+
+                    c4 = 2 * zmask[jj, jim1]
+                    c5 = 2 * zmask[jj, jip1]
+
+                    c1 = 1 * zmask[jjp1, jim1]
+                    c2 = 2 * zmask[jjp1, ji]
+                    c3 = 1 * zmask[jjp1, jip1]
+
+                    ctot = c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8
+
+                    if ctot >= 3:
+                        # compute the new value for this point
+                        zval = (
+                            c6 * ztmp[jjm1, jim1]
+                            + c7 * ztmp[jjm1, ji]
+                            + c8 * ztmp[jjm1, jip1]
+                            + c4 * ztmp[jj, jim1]
+                            + c5 * ztmp[jj, jip1]
+                            + c1 * ztmp[jjp1, jim1]
+                            + c2 * ztmp[jjp1, ji]
+                            + c3 * ztmp[jjp1, jip1]
+                        ) / ctot
+
+                        # update value in field array
+                        ztmp_new[jj, ji] = zval
+                        # set the mask to sea
+                        zmask_new[jj, ji] = 1
+        nt += 1
+        ztmp = ztmp_new.copy()
+        zmask = zmask_new.copy()
+
+        if nt == nmax:
+            raise ValueError(
+                "number of iterations exceeded maximum, " "try increasing nmax"
+            )
+
+    drowned = ztmp[1:-1, 1:-1]
+
+    return drowned

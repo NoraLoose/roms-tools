@@ -3,7 +3,7 @@ import xarray as xr
 from numba import jit
 
 
-def lateral_fill(var, dims=["latitude", "longitude"], method="sor"):
+def lateral_fill(var, dims=["latitude", "longitude"], method="sor", max_iter=10000):
     """
     Fills all NaN values in an xarray DataArray via a lateral fill, while leaving existing non-NaN values unchanged.
 
@@ -20,6 +20,9 @@ def lateral_fill(var, dims=["latitude", "longitude"], method="sor"):
         The fill method to use. Options are:
         - "sor": Successive Over-Relaxation (SOR) method.
         - "kara": Kara et al. extrapolation method.
+    
+    max_iter : int, optional, default=10000
+        Maximum number of iterations to perform.
 
     Returns
     -------
@@ -37,13 +40,13 @@ def lateral_fill(var, dims=["latitude", "longitude"], method="sor"):
         output_dtypes=[var.dtype, np.int32],
         dask="parallelized",
         vectorize=True,
-        kwargs={"method": method},
+        kwargs={"method": method, "max_iter": max_iter},
     )
 
     return var_filled, iter_cnt
 
 
-def _lateral_fill_np_array(var, method, fillvalue=0.0):
+def _lateral_fill_np_array(var, method, max_iter=10000, fillvalue=0.0):
     """
     Fill NaN values in a NumPy array laterally using the specified method, while leaving
     existing non-NaN values unchanged.
@@ -57,6 +60,8 @@ def _lateral_fill_np_array(var, method, fillvalue=0.0):
         The fill method to use. Options are:
         - "sor": Successive Over-Relaxation (SOR) method.
         - "kara": Kara et al. extrapolation method.
+    max_iter : int, optional, default=10000
+        Maximum number of iterations to perform.
     fillvalue : float, optional
         The value to use if the entire array contains only NaNs. Default is 0.0.
 
@@ -79,24 +84,25 @@ def _lateral_fill_np_array(var, method, fillvalue=0.0):
       (https://doi.org/10.1175/JPO2984.1) for extrapolating values over masked regions.
     """
 
-    fillmask = np.isnan(var)  # fill all NaNs
+    mask = np.isnan(var)  # fill all NaNs
     var = var.copy()
 
     if method == "sor":
         nlat, nlon = var.shape[-2:]
-        var, iter_cnt = _iterative_fill_sor(nlat, nlon, var, fillmask, fillvalue)
+        var, iter_cnt = _iterative_fill_sor(nlat, nlon, var, mask, fillvalue, max_iter)
 
     elif method == "kara":
 
         var[np.isnan(var)] = 1e15
-        var, iter_cnt = flood_kara_raw(var, fillmask)
+        var, iter_cnt = flood_kara_raw(var, 1 - mask.astype(int), max_iter)
+        var[var==1e15] = np.nan
 
     return var, iter_cnt
 
 
 @jit(nopython=True, parallel=True)
 def _iterative_fill_sor(
-    nlat, nlon, var, fillmask, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000
+    nlat, nlon, var, fillmask, fillvalue=0.0, max_iter=10000, tol=1.0e-4, rc=1.8
 ):
     """
     Perform an iterative land fill algorithm using the Successive Over-Relaxation (SOR)
@@ -118,6 +124,10 @@ def _iterative_fill_sor(
 
     fillvalue: float
         Value to use if the full field is NaNs. Default is 0.0.
+    
+    max_iter : int, optional, default=10000
+        Maximum number of iterations to perform before giving up if the tolerance
+        is not reached.
 
     tol : float, optional, default=1.0e-4
         Convergence criteria: stop filling when the value change is less than
@@ -129,10 +139,6 @@ def _iterative_fill_sor(
         typically converge faster with larger coefficients. For completely
         land-filling a 1-degree grid (360x180), a coefficient in the range 1.85-1.9
         is near optimal. Valid bounds are (1.0, 2.0).
-
-    max_iter : int, optional, default=10000
-        Maximum number of iterations to perform before giving up if the tolerance
-        is not reached.
 
     max_iter : int, optional, default=10000
         Maximum number of iterations to perform before giving up if the tolerance
@@ -384,11 +390,6 @@ def flood_kara_raw(field, mask, nmax=1000, fillvalue=0.0):
         nt += 1
         ztmp = ztmp_new.copy()
         zmask = zmask_new.copy()
-
-        if nt == nmax:
-            raise ValueError(
-                "number of iterations exceeded maximum, " "try increasing nmax"
-            )
 
     drowned = ztmp[1:-1, 1:-1]
     print(nt)

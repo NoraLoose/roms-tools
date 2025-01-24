@@ -51,6 +51,8 @@ class TidalForcing:
         The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    use_xesmf: bool, optional
+        Indicates whether to use xesmf for regridding. Defaults to False.
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
@@ -69,6 +71,7 @@ class TidalForcing:
     allan_factor: float = 2.0
     model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = False
+    use_xesmf: bool = False
     bypass_validation: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
@@ -95,7 +98,18 @@ class TidalForcing:
 
         processed_fields = {}
         # lateral regridding
-        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+        source_grid = {
+            "dim_names": data.dim_names,
+            "coords": {
+                data.dim_names["latitude"]: data.ds[data.dim_names["latitude"]],
+                data.dim_names["longitude"]: data.ds[data.dim_names["longitude"]],
+            },
+        }
+        lateral_regrid = LateralRegrid(
+            source_grid=source_grid,
+            target_coords=target_coords,
+            use_xesmf=self.use_xesmf,
+        )
         for var_name in var_names:
             if var_name in data.var_names.keys():
                 processed_fields[var_name] = lateral_regrid.apply(

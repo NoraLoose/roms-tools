@@ -74,6 +74,8 @@ class BoundaryForcing:
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    use_xesmf: bool, optional
+        Indicates whether to use xesmf for regridding. Defaults to False.
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
@@ -107,6 +109,7 @@ class BoundaryForcing:
     apply_2d_horizontal_fill: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = False
+    use_xesmf: bool = False
     bypass_validation: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
@@ -160,6 +163,17 @@ class BoundaryForcing:
                     for name, info in self.variable_info.items()
                     if info["is_vector"]
                 ]
+                source_grid = {
+                    "dim_names": bdry_data.dim_names,
+                    "coords": {
+                        bdry_data.dim_names["latitude"]: bdry_data.ds[
+                            data.dim_names["latitude"]
+                        ],
+                        bdry_data.dim_names["longitude"]: bdry_data.ds[
+                            data.dim_names["longitude"]
+                        ],
+                    },
+                }
                 if len(vector_var_names) > 0:
                     lon = target_coords["lon"].isel(
                         **self.bdry_coords["vector"][direction]
@@ -168,7 +182,9 @@ class BoundaryForcing:
                         **self.bdry_coords["vector"][direction]
                     )
                     lateral_regrid = LateralRegrid(
-                        {"lat": lat, "lon": lon}, bdry_data.dim_names
+                        source_grid=source_grid,
+                        target_coords={"lat": lat, "lon": lon},
+                        use_xesmf=self.use_xesmf,
                     )
                     for var_name in vector_var_names:
                         if var_name in bdry_data.var_names.keys():
@@ -190,7 +206,9 @@ class BoundaryForcing:
                         **self.bdry_coords["rho"][direction]
                     )
                     lateral_regrid = LateralRegrid(
-                        {"lat": lat, "lon": lon}, bdry_data.dim_names
+                        source_grid=source_grid,
+                        target_coords={"lat": lat, "lon": lon},
+                        use_xesmf=self.use_xesmf,
                     )
                     for var_name in tracer_var_names:
                         if var_name in bdry_data.var_names.keys():

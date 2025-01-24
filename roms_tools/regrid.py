@@ -2,50 +2,92 @@ import xarray as xr
 
 
 class LateralRegrid:
-    """Handles lateral regridding of data onto a new spatial grid."""
+    """Handles lateral regridding of data onto a new spatial grid.
 
-    def __init__(self, target_coords, source_dim_names):
-        """Initialize target grid coordinates and names for grid dimensions.
+    Parameters
+    ----------
+    source_grid : dict
+        Dictionary containing the source grid information. It should have:
+        - 'dim_names': A dictionary specifying names for the latitude and longitude dimensions
+                       (e.g., {"latitude": "lat", "longitude": "lon"}).
+        - 'coords': A dictionary of xarray.DataArrays for the source latitude and longitude,
+                    typically with keys matching 'dim_names'.
+    target_coords : dict
+        Dictionary containing 'lon' and 'lat' as xarray.DataArrays representing
+        the longitude and latitude values of the target grid.
+    use_xesmf : bool, optional
+        If True, use xESMF for regridding. If False, use xarray's interpolation.
 
-        Parameters
-        ----------
-        target_coords : dict
-            Dictionary containing 'lon' and 'lat' as xarray.DataArrays representing
-            the longitude and latitude values of the target grid.
-        source_dim_names : dict
-            Dictionary specifying names for the latitude and longitude dimensions,
-            typically using keys like "latitude" and "longitude" to align with the dataset conventions.
+    Attributes
+    ----------
+    use_xesmf : bool
+        Indicates whether to use xESMF for regridding.
+    coords : dict
+        Maps source dimension names to the corresponding latitude and longitude
+        DataArrays for the target grid (only used if `use_xesmf=False`).
+    regridder : xesmf.Regridder or None
+        xESMF regridder object (only used if `use_xesmf=True`).
+    """
 
-        Attributes
-        ----------
-        coords : dict
-            Maps the dimension names to the corresponding latitude and longitude
-            DataArrays, providing easy access to target grid coordinates.
-        """
+    def __init__(self, source_grid, target_coords, use_xesmf=False):
+        self.use_xesmf = use_xesmf
 
-        self.coords = {
-            source_dim_names["latitude"]: target_coords["lat"],
-            source_dim_names["longitude"]: target_coords["lon"],
-        }
+        if self.use_xesmf:
 
-    def apply(self, da, method="linear"):
-        """Fills missing values and regrids the variable.
+            # Prepare source and target grids for xESMF
+            self.regridder = self._initialize_xesmf_regridder(
+                source_grid, target_coords
+            )
+        else:
+            # Prepare target grid coordinates for xarray interpolation
+            dim_names = source_grid["dim_names"]
+            self.coords = {
+                dim_names["latitude"]: target_coords["lat"],
+                dim_names["longitude"]: target_coords["lon"],
+            }
+
+    def _initialize_xesmf_regridder(self, source_grid, target_coords):
+        """Initializes an xESMF regridder."""
+        import xesmf
+
+        dim_names = source_grid["dim_names"]
+        source_ds = xr.Dataset()
+        source_ds["lon"] = source_grid["coords"][dim_names["longitude"]].rename(
+            {dim_names["longitude"]: "nlon"}
+        )
+        source_ds["lat"] = source_grid["coords"][dim_names["latitude"]].rename(
+            {dim_names["latitude"]: "nlat"}
+        )
+
+        target_ds = xr.Dataset()
+        target_ds["lon"] = target_coords["lon"]
+        target_ds["lat"] = target_coords["lat"]
+
+        return xesmf.Regridder(
+            source_ds, target_ds, method="bilinear", reuse_weights=True
+        )
+
+    def apply(self, da):
+        """Regrids the input variable to the target grid.
 
         Parameters
         ----------
         da : xarray.DataArray
-            Input data to fill and regrid.
-        method : str
-            Interpolation method to use.
+            The input data to regrid. This should have coordinates matching the source grid.
 
         Returns
         -------
         xarray.DataArray
-            Regridded data with filled values.
+            The regridded data aligned to the target grid.
         """
-        regridded = da.interp(self.coords, method=method).drop_vars(
-            list(self.coords.keys())
-        )
+        if self.use_xesmf:
+            regridded = self.regridder(da)
+        else:
+            method = "linear"
+            # Regrid using xarray's built-in interpolation
+            regridded = da.interp(self.coords, method=method).drop_vars(
+                list(self.coords.keys())
+            )
         return regridded
 
 

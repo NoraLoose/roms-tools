@@ -123,9 +123,7 @@ def _get_topography_data(source):
     return data
 
 
-def _make_raw_topography(
-    data, target_coords, method="linear", verbose=False
-) -> xr.DataArray:
+def _make_raw_topography(data, target_coords, verbose=False) -> xr.DataArray:
     """Regrid topography data to match target coordinates.
 
     Parameters
@@ -134,8 +132,6 @@ def _make_raw_topography(
         The dataset object containing the topography data.
     target_coords : object
         The target coordinates to which the data will be regridded.
-    method : str, optional
-        The regridding method to use, by default "linear".
     verbose : bool, optional
         If True, logs the time taken for regridding, by default False.
 
@@ -148,8 +144,16 @@ def _make_raw_topography(
 
     if verbose:
         start_time = time.time()
-    lateral_regrid = LateralRegrid(target_coords, data.dim_names)
-    hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]], method=method)
+
+    source_grid = {
+        "dim_names": data.dim_names,
+        "coords": {
+            data.dim_names["latitude"]: data.ds[data.dim_names["latitude"]],
+            data.dim_names["longitude"]: data.ds[data.dim_names["longitude"]],
+        },
+    }
+    lateral_regrid = LateralRegrid(source_grid=source_grid, target_coords=target_coords)
+    hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]])
     if verbose:
         logging.info(
             f"Regridding the topography: {time.time() - start_time:.3f} seconds"

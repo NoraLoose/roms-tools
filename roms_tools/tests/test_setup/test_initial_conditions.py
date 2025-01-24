@@ -18,7 +18,7 @@ from conftest import calculate_file_hash
         "initial_conditions_with_bgc_from_climatology",
     ],
 )
-def test_initial_conditions_creation(ic_fixture, request):
+def test_initial_conditions_creation(ic_fixture, request, use_xesmf):
     """Test the creation of the InitialConditions object."""
 
     ic = request.getfixturevalue(ic_fixture)
@@ -29,6 +29,7 @@ def test_initial_conditions_creation(ic_fixture, request):
         "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
         "climatology": False,
     }
+    assert ic.use_xesmf == use_xesmf
     assert isinstance(ic.ds, xr.Dataset)
     assert "temp" in ic.ds
     assert "salt" in ic.ds
@@ -59,29 +60,31 @@ def example_grid():
 
 
 # Test initialization with missing 'name' in source
-def test_initial_conditions_missing_physics_name(example_grid, use_dask):
+def test_initial_conditions_missing_physics_name(example_grid, use_dask, use_xesmf):
     with pytest.raises(ValueError, match="`source` must include a 'name'."):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
             source={"path": "physics_data.nc"},
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
 
 # Test initialization with missing 'path' in source
-def test_initial_conditions_missing_physics_path(example_grid, use_dask):
+def test_initial_conditions_missing_physics_path(example_grid, use_dask, use_xesmf):
     with pytest.raises(ValueError, match="`source` must include a 'path'."):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS"},
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
 
 # Test initialization with missing 'name' in bgc_source
-def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
+def test_initial_conditions_missing_bgc_name(example_grid, use_dask, use_xesmf):
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
@@ -93,11 +96,12 @@ def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
             source={"name": "GLORYS", "path": fname},
             bgc_source={"path": "bgc_data.nc"},
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
 
 # Test initialization with missing 'path' in bgc_source
-def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
+def test_initial_conditions_missing_bgc_path(example_grid, use_dask, use_xesmf):
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
@@ -109,11 +113,12 @@ def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
             source={"name": "GLORYS", "path": fname},
             bgc_source={"name": "CESM_REGRIDDED"},
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
 
 # Test default climatology value
-def test_initial_conditions_default_climatology(example_grid, use_dask):
+def test_initial_conditions_default_climatology(example_grid, use_dask, use_xesmf):
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
@@ -122,13 +127,14 @@ def test_initial_conditions_default_climatology(example_grid, use_dask):
         ini_time=datetime(2021, 6, 29),
         source={"name": "GLORYS", "path": fname},
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
     assert initial_conditions.source["climatology"] is False
     assert initial_conditions.bgc_source is None
 
 
-def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
+def test_initial_conditions_default_bgc_climatology(example_grid, use_dask, use_xesmf):
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     fname_bgc = Path(download_test_data("CESM_regional_test_data_one_time_slice.nc"))
@@ -139,6 +145,7 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
         source={"name": "GLORYS", "path": fname},
         bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
     assert initial_conditions.bgc_source["climatology"] is False

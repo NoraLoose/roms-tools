@@ -65,14 +65,20 @@ def grid_that_straddles_180_degree_meridian():
         "grid_that_straddles_180_degree_meridian",
     ],
 )
-def test_successful_initialization_with_global_data(grid_fixture, request, use_dask):
+def test_successful_initialization_with_global_data(
+    grid_fixture, request, use_dask, use_xesmf
+):
 
     fname = Path(download_test_data("TPXO_global_test_data.nc"))
 
     grid = request.getfixturevalue(grid_fixture)
 
     tidal_forcing = TidalForcing(
-        grid=grid, source={"name": "TPXO", "path": fname}, ntides=2, use_dask=use_dask
+        grid=grid,
+        source={"name": "TPXO", "path": fname},
+        ntides=2,
+        use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
     assert isinstance(tidal_forcing.ds, xr.Dataset)
@@ -88,10 +94,11 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
 
     assert tidal_forcing.source == {"name": "TPXO", "path": fname}
     assert tidal_forcing.ntides == 2
+    assert tidal_forcing.use_xesmf == use_xesmf
 
 
 def test_successful_initialization_with_regional_data(
-    grid_that_lies_within_bounds_of_regional_tpxo_data, use_dask
+    grid_that_lies_within_bounds_of_regional_tpxo_data, use_dask, use_xesmf
 ):
 
     fname = Path(download_test_data("TPXO_regional_test_data.nc"))
@@ -101,6 +108,7 @@ def test_successful_initialization_with_regional_data(
         source={"name": "TPXO", "path": fname},
         ntides=10,
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
     assert isinstance(tidal_forcing.ds, xr.Dataset)
@@ -116,10 +124,11 @@ def test_successful_initialization_with_regional_data(
 
     assert tidal_forcing.source == {"name": "TPXO", "path": fname}
     assert tidal_forcing.ntides == 10
+    assert tidal_forcing.use_xesmf == use_xesmf
 
 
 def test_unsuccessful_initialization_with_regional_data_due_to_nans(
-    grid_that_is_out_of_bounds_of_regional_tpxo_data, use_dask
+    grid_that_is_out_of_bounds_of_regional_tpxo_data, use_dask, use_xesmf
 ):
 
     fname = Path(download_test_data("TPXO_regional_test_data.nc"))
@@ -130,6 +139,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_nans(
             source={"name": "TPXO", "path": fname},
             ntides=10,
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
 
@@ -138,7 +148,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_nans(
     ["grid_that_straddles_dateline", "grid_that_straddles_180_degree_meridian"],
 )
 def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
-    grid_fixture, request, use_dask
+    grid_fixture, request, use_dask, use_xesmf
 ):
 
     fname = Path(download_test_data("TPXO_regional_test_data.nc"))
@@ -153,10 +163,13 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
             source={"name": "TPXO", "path": fname},
             ntides=10,
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
 
-def test_insufficient_number_of_consituents(grid_that_straddles_dateline, use_dask):
+def test_insufficient_number_of_consituents(
+    grid_that_straddles_dateline, use_dask, use_xesmf
+):
 
     fname = Path(download_test_data("TPXO_global_test_data.nc"))
 
@@ -166,6 +179,7 @@ def test_insufficient_number_of_consituents(grid_that_straddles_dateline, use_da
             source={"name": "TPXO", "path": fname},
             ntides=10,
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
 

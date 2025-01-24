@@ -163,7 +163,9 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
         "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
     ],
 )
-def test_successful_initialization_with_regional_data(grid_fixture, request, use_dask):
+def test_successful_initialization_with_regional_data(
+    grid_fixture, request, use_dask, use_xesmf
+):
     """Test the initialization of SurfaceForcing with regional ERA5 data.
 
     The test is performed twice:
@@ -187,6 +189,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request, use
             source={"name": "ERA5", "path": fname},
             correct_radiation=True,
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
         assert sfc_forcing.ds is not None
@@ -206,6 +209,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request, use
             "path": fname,
             "climatology": False,
         }
+        assert sfc_forcing.use_xesmf == use_xesmf
         assert sfc_forcing.ds.coords["time"].attrs["units"] == "days"
 
         if use_coarse_grid:
@@ -226,7 +230,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request, use
     ],
 )
 def test_nan_detection_initialization_with_regional_data(
-    grid_fixture, request, use_dask
+    grid_fixture, request, use_dask, use_xesmf
 ):
     """Test handling of NaN values during initialization with regional data.
 
@@ -249,11 +253,12 @@ def test_nan_detection_initialization_with_regional_data(
                 end_time=end_time,
                 source={"name": "ERA5", "path": fname},
                 use_dask=use_dask,
+                use_xesmf=use_xesmf,
             )
 
 
 def test_no_longitude_intersection_initialization_with_regional_data(
-    grid_that_straddles_180_degree_meridian, use_dask
+    grid_that_straddles_180_degree_meridian, use_dask, use_xesmf
 ):
     """Test initialization of SurfaceForcing with a grid that straddles the 180°
     meridian.
@@ -278,6 +283,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
                 end_time=end_time,
                 source={"name": "ERA5", "path": fname},
                 use_dask=use_dask,
+                use_xesmf=use_xesmf,
             )
 
 
@@ -294,7 +300,9 @@ def test_no_longitude_intersection_initialization_with_regional_data(
         "grid_that_straddles_180_degree_meridian",
     ],
 )
-def test_successful_initialization_with_global_data(grid_fixture, request, use_dask):
+def test_successful_initialization_with_global_data(
+    grid_fixture, request, use_dask, use_xesmf
+):
     """Test initialization of SurfaceForcing with global data.
 
     Verifies that the SurfaceForcing object is correctly initialized with global data,
@@ -316,6 +324,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
             end_time=end_time,
             source={"name": "ERA5", "path": fname},
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
         assert sfc_forcing.start_time == start_time
         assert sfc_forcing.end_time == end_time
@@ -325,7 +334,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
             "path": fname,
             "climatology": False,
         }
-
+        assert sfc_forcing.use_xesmf == use_xesmf
         assert "uwnd" in sfc_forcing.ds
         assert "vwnd" in sfc_forcing.ds
         assert "swrad" in sfc_forcing.ds
@@ -342,7 +351,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
             assert not sfc_forcing.use_coarse_grid
 
 
-def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
+def test_nans_filled_in(grid_that_straddles_dateline, use_dask, use_xesmf):
     """Test that the surface forcing fields contain no NaNs.
 
     The test is performed twice:
@@ -364,6 +373,7 @@ def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
             end_time=end_time,
             source={"name": "ERA5", "path": fname},
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
         # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
@@ -381,6 +391,7 @@ def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
             source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
             type="bgc",
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
         # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
@@ -427,7 +438,7 @@ def test_time_attr(bgc_surface_forcing):
     ],
 )
 def test_surface_forcing_creation(
-    sfc_forcing_fixture, expected_climatology, expected_fname, request
+    sfc_forcing_fixture, expected_climatology, expected_fname, request, use_xesmf
 ):
     """Test the creation and initialization of the SurfaceForcing object with BGC.
 
@@ -454,6 +465,7 @@ def test_surface_forcing_creation(
         "path": expected_fname,
         "climatology": expected_climatology,
     }
+    assert sfc_forcing.use_xesmf == use_xesmf
     assert not sfc_forcing.use_coarse_grid
     assert sfc_forcing.ds.attrs["source"] == "CESM_REGRIDDED"
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:

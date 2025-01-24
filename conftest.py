@@ -30,6 +30,9 @@ def pytest_addoption(parser):
     parser.addoption(
         "--use_dask", action="store_true", default=False, help="Run tests with Dask"
     )
+    parser.addoption(
+        "--use_xesmf", action="store_true", default=False, help="Regrid with xesmf"
+    )
 
 
 def pytest_configure(config):
@@ -41,6 +44,11 @@ def pytest_configure(config):
 @pytest.fixture(scope="session")
 def use_dask(request):
     return request.config.getoption("--use_dask")
+
+
+@pytest.fixture(scope="session")
+def use_xesmf(request):
+    return request.config.getoption("--use_xesmf")
 
 
 @pytest.fixture(scope="session")
@@ -81,7 +89,7 @@ def grid_that_straddles_180_degree_meridian():
 
 
 @pytest.fixture(scope="session")
-def tidal_forcing(request, use_dask):
+def tidal_forcing(request, use_dask, use_xesmf):
 
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
@@ -89,12 +97,16 @@ def tidal_forcing(request, use_dask):
     fname = Path(download_test_data("TPXO_regional_test_data.nc"))
 
     return TidalForcing(
-        grid=grid, source={"name": "TPXO", "path": fname}, ntides=1, use_dask=use_dask
+        grid=grid,
+        source={"name": "TPXO", "path": fname},
+        ntides=1,
+        use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def initial_conditions(request, use_dask):
+def initial_conditions(request, use_dask, use_xesmf):
     """Fixture for creating an InitialConditions object."""
 
     grid = Grid(
@@ -118,11 +130,12 @@ def initial_conditions(request, use_dask):
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_with_bgc(request, use_dask):
+def initial_conditions_with_bgc(request, use_dask, use_xesmf):
     """Fixture for creating an InitialConditions object."""
 
     grid = Grid(
@@ -148,11 +161,12 @@ def initial_conditions_with_bgc(request, use_dask):
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_with_bgc_from_climatology(request, use_dask):
+def initial_conditions_with_bgc_from_climatology(request, use_dask, use_xesmf):
     """Fixture for creating an InitialConditions object."""
 
     grid = Grid(
@@ -182,11 +196,12 @@ def initial_conditions_with_bgc_from_climatology(request, use_dask):
             "climatology": True,
         },
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing(request, use_dask):
+def boundary_forcing(request, use_dask, use_xesmf):
     """Fixture for creating a BoundaryForcing object."""
 
     grid = Grid(
@@ -212,11 +227,12 @@ def boundary_forcing(request, use_dask):
         source={"name": "GLORYS", "path": fname},
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def bgc_boundary_forcing_from_climatology(request, use_dask):
+def bgc_boundary_forcing_from_climatology(request, use_dask, use_xesmf):
     """Fixture for creating a BoundaryForcing object."""
 
     grid = Grid(
@@ -245,11 +261,12 @@ def bgc_boundary_forcing_from_climatology(request, use_dask):
         type="bgc",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def surface_forcing(request, use_dask):
+def surface_forcing(request, use_dask, use_xesmf):
     """Fixture for creating a SurfaceForcing object."""
 
     grid = Grid(
@@ -273,11 +290,12 @@ def surface_forcing(request, use_dask):
         end_time=end_time,
         source={"name": "ERA5", "path": fname},
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def coarse_surface_forcing(request, use_dask):
+def coarse_surface_forcing(request, use_dask, use_xesmf):
     """Fixture for creating a SurfaceForcing object."""
 
     grid = Grid(
@@ -302,11 +320,12 @@ def coarse_surface_forcing(request, use_dask):
         use_coarse_grid=True,
         source={"name": "ERA5", "path": fname},
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def corrected_surface_forcing(request, use_dask):
+def corrected_surface_forcing(request, use_dask, use_xesmf):
     """Fixture for creating a SurfaceForcing object with shortwave radiation
     correction."""
 
@@ -332,11 +351,12 @@ def corrected_surface_forcing(request, use_dask):
         source={"name": "ERA5", "path": fname},
         correct_radiation=True,
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def bgc_surface_forcing(request, use_dask):
+def bgc_surface_forcing(request, use_dask, use_xesmf):
     """Fixture for creating a SurfaceForcing object with BGC."""
     grid = Grid(
         nx=5,
@@ -360,11 +380,12 @@ def bgc_surface_forcing(request, use_dask):
         source={"name": "CESM_REGRIDDED", "path": fname_bgc},
         type="bgc",
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 
 @pytest.fixture(scope="session")
-def bgc_surface_forcing_from_climatology(request, use_dask):
+def bgc_surface_forcing_from_climatology(request, use_dask, use_xesmf):
     """Fixture for creating a SurfaceForcing object with BGC from climatology."""
     grid = Grid(
         nx=5,
@@ -388,6 +409,7 @@ def bgc_surface_forcing_from_climatology(request, use_dask):
         source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
         type="bgc",
         use_dask=use_dask,
+        use_xesmf=use_xesmf,
     )
 
 

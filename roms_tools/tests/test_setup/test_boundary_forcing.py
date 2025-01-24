@@ -16,7 +16,7 @@ import logging
         # "boundary_forcing_with_2d_fill",
     ],
 )
-def test_boundary_forcing_creation(boundary_forcing_fixture, request):
+def test_boundary_forcing_creation(boundary_forcing_fixture, request, use_xesmf):
     """Test the creation of the BoundaryForcing object."""
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
@@ -35,7 +35,7 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
         "north": True,
         "west": True,
     }
-
+    assert boundary_forcing.use_xesmf == use_xesmf
     assert boundary_forcing.ds.source == "GLORYS"
     for direction in ["south", "east", "north", "west"]:
         assert f"temp_{direction}" in boundary_forcing.ds
@@ -56,7 +56,9 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
         # "bgc_boundary_forcing_from_climatology_with_2d_fill",
     ],
 )
-def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
+def test_boundary_forcing_creation_with_bgc(
+    boundary_forcing_fixture, request, use_xesmf
+):
     """Test the creation of the BoundaryForcing object."""
 
     fname_bgc = Path(
@@ -78,7 +80,7 @@ def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
         "north": True,
         "west": True,
     }
-
+    assert boundary_forcing.use_xesmf == use_xesmf
     assert boundary_forcing.ds.source == "CESM_REGRIDDED"
     for direction in ["south", "east", "north", "west"]:
         for var in ["ALK", "PO4"]:
@@ -89,7 +91,7 @@ def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
     assert hasattr(boundary_forcing.ds, "climatology")
 
 
-def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
+def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask, use_xesmf):
 
     grid = Grid(
         nx=2,
@@ -116,6 +118,7 @@ def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
             source={"name": "GLORYS", "path": fname},
             apply_2d_horizontal_fill=False,
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
@@ -130,10 +133,11 @@ def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
             type="bgc",
             apply_2d_horizontal_fill=False,
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
 
 
-def test_boundary_divided_by_land_warning(caplog, use_dask):
+def test_boundary_divided_by_land_warning(caplog, use_dask, use_xesmf):
 
     # Iceland intersects the western boundary of the following grid
     grid = Grid(
@@ -150,12 +154,13 @@ def test_boundary_divided_by_land_warning(caplog, use_dask):
             source={"path": fname, "name": "GLORYS", "climatology": False},
             apply_2d_horizontal_fill=False,
             use_dask=use_dask,
+            use_xesmf=use_xesmf,
         )
     # Verify the warning message in the log
     assert "the western boundary is divided by land" in caplog.text
 
 
-def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
+def test_1d_and_2d_fill_coincide_if_no_land(use_dask, use_xesmf):
 
     # this grid lies entirely over open ocean
     grid = Grid(nx=5, ny=5, size_x=300, size_y=300, center_lon=-5, center_lat=65, rot=0)
@@ -168,6 +173,7 @@ def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
         "end_time": datetime(2021, 6, 29),
         "source": {"path": fname, "name": "GLORYS", "climatology": False},
         "use_dask": use_dask,
+        "use_xesmf": use_xesmf,
     }
 
     bf_1d_fill = BoundaryForcing(

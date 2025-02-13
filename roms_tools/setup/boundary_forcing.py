@@ -910,6 +910,7 @@ class BoundaryForcing:
         self,
         filepath: Union[str, Path],
         group: bool = True,
+        parallel_write: bool = False,
     ) -> None:
         """Save the boundary forcing fields to one or more netCDF4 files.
 
@@ -945,7 +946,10 @@ class BoundaryForcing:
             output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(
-            dataset_list, output_filenames, use_dask=self.use_dask
+            dataset_list,
+            output_filenames,
+            use_dask=self.use_dask,
+            parallel_write=parallel_write,
         )
 
         return saved_filenames

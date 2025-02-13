@@ -304,7 +304,9 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     return transposed_da
 
 
-def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
+def save_datasets(
+    dataset_list, output_filenames, use_dask=False, parallel_write=False, verbose=True
+):
     """Save the list of datasets to netCDF4 files.
 
     Parameters
@@ -337,7 +339,13 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
         from dask.diagnostics import ProgressBar
 
         with ProgressBar():
-            xr.save_mfdataset(dataset_list, output_filenames)
+            if parallel_write:
+                delayed = xr.save_mfdataset(
+                    dataset_list, output_filenames, compute=False
+                )
+                delayed.compute()
+            else:
+                xr.save_mfdataset(dataset_list, output_filenames, compute=True)
     else:
         xr.save_mfdataset(dataset_list, output_filenames)
 

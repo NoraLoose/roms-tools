@@ -453,69 +453,75 @@ class ROMSOutput:
         return ds
 
     def _infer_model_reference_date_from_metadata(self, ds: xr.Dataset) -> None:
-        """Infer and validate the model reference date from `ocean_time` metadata.
+        """Infer and validate the model reference date from `ocean_time` metadata, if available.
 
         Parameters
         ----------
         ds : xr.Dataset
-            Dataset with an `ocean_time` variable and a `long_name` attribute
-            in the format `Time since YYYY/MM/DD`.
+            Dataset that may include an `ocean_time` variable with a `long_name`
+            attribute in the format `Time since YYYY/MM/DD`.
+
+        Behavior
+        --------
+        - If `ocean_time` and a valid reference date are present in metadata:
+            - Sets `self.model_reference_date` if not already set.
+            - Validates against `self.model_reference_date` if it is set.
+        - If no valid metadata is found:
+            - Uses `self.model_reference_date` if available.
+            - Raises ValueError if neither metadata nor `model_reference_date` are provided.
 
         Raises
         ------
         ValueError
-            If `self.model_reference_date` is not set and the reference date cannot
-            be inferred, or if the inferred date does not match `self.model_reference_date`.
-
-        Warns
-        -----
-        UserWarning
-            If `self.model_reference_date` is set but the reference date cannot be inferred.
+            If the reference date cannot be inferred and `model_reference_date` is None,
+            or if the inferred date conflicts with an existing `model_reference_date`.
         """
-        # Check if 'long_name' exists in the attributes of 'ocean_time'
-        if "long_name" in ds.ocean_time.attrs:
-            input_string = ds.ocean_time.attrs["long_name"]
-            match = re.search(r"(\d{4})/(\d{2})/(\d{2})", input_string)
+        inferred_date: datetime | None = None
 
-            if match:
-                # If a match is found, extract year, month, day and create the inferred date
-                year, month, day = map(int, match.groups())
-                inferred_date = datetime(year, month, day)
+        # Try to infer from metadata if ocean_time is available
+        if "ocean_time" in ds.variables:
+            ocean_time_var = ds["ocean_time"]
+            long_name = ocean_time_var.attrs.get("long_name")
 
-                if hasattr(self, "model_reference_date") and self.model_reference_date:
-                    # Check if the inferred date matches the provided model reference date
-                    if self.model_reference_date != inferred_date:
-                        raise ValueError(
-                            f"Mismatch between `self.model_reference_date` ({self.model_reference_date}) "
-                            f"and inferred reference date ({inferred_date})."
-                        )
+            if long_name:
+                match = re.search(r"(\d{4})/(\d{2})/(\d{2})", long_name)
+                if match:
+                    year, month, day = map(int, match.groups())
+                    inferred_date = datetime(year, month, day)
                 else:
-                    # Set the model reference date if not already set
-                    self.model_reference_date = inferred_date
-            else:
-                # Handle case where no match is found
-                if hasattr(self, "model_reference_date") and self.model_reference_date:
                     logging.warning(
-                        "Could not infer the model reference date from the metadata. "
-                        "`self.model_reference_date` will be used.",
+                        "Could not parse a valid date from `ocean_time.long_name`. "
+                        "Falling back to `self.model_reference_date` if available."
                     )
-                else:
-                    raise ValueError(
-                        "Model reference date could not be inferred from the metadata, "
-                        "and `self.model_reference_date` is not set."
-                    )
-        else:
-            # Handle case where 'long_name' attribute doesn't exist
-            if hasattr(self, "model_reference_date") and self.model_reference_date:
-                logging.warning(
-                    "`long_name` attribute not found in ocean_time. "
-                    "`self.model_reference_date` will be used instead.",
-                )
             else:
-                raise ValueError(
-                    "Model reference date could not be inferred from the metadata, "
-                    "and `self.model_reference_date` is not set."
+                logging.warning(
+                    "`long_name` attribute missing in `ocean_time`. "
+                    "Falling back to `self.model_reference_date` if available."
                 )
+        else:
+            logging.warning(
+                "`ocean_time` variable missing in dataset. "
+                "Falling back to `self.model_reference_date` if available."
+            )
+
+        # If neither inferred nor provided, error
+        if inferred_date is None and self.model_reference_date is None:
+            raise ValueError(
+                "Model reference date could not be inferred from metadata, "
+                "and `model_reference_date` is not set. Please provide one explicitly."
+            )
+
+        # If both exist, ensure consistency
+        if inferred_date and self.model_reference_date:
+            if self.model_reference_date != inferred_date:
+                raise ValueError(
+                    f"Mismatch between provided model reference date ({self.model_reference_date}) "
+                    f"and inferred date from metadata ({inferred_date})."
+                )
+
+        # If inferred but not set yet, assign it
+        if self.model_reference_date is None and inferred_date is not None:
+            self.model_reference_date = inferred_date
 
     def _check_vertical_coordinate(self, ds: xr.Dataset) -> None:
         """Check that the vertical coordinate parameters in the dataset are consistent

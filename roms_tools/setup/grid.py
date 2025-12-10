@@ -1,6 +1,5 @@
 import importlib.metadata
 import logging
-import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,6 @@ from roms_tools.setup.mask import add_mask, add_velocity_masks
 from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
     Timed,
-    extract_single_value,
     gc_dist,
     get_target_coords,
     interpolate_from_rho_to_u,
@@ -118,6 +116,8 @@ class Grid:
     verbose: bool = False
     """Whether to print grid generation steps with timing."""
 
+    filepath: str | Path | None = field(init=False, repr=False)
+    """Path to the file from which the grid was loaded."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -618,6 +618,8 @@ class Grid:
         # Create a new Grid instance without calling __init__ and __post_init__
         grid = cls.__new__(cls)
 
+        grid.filepath = filepath
+
         # Set the dataset for the grid instance
         grid.ds = ds
 
@@ -702,78 +704,6 @@ class Grid:
         grid.N = len(grid.ds.s_rho)
 
         # Manually set the remaining attributes by extracting parameters from dataset
-        grid.nx = ds.sizes["xi_rho"] - 2
-        grid.ny = ds.sizes["eta_rho"] - 2
-        if "center_lon" in ds.attrs:
-            center_lon = float(ds.attrs["center_lon"])
-        elif "tra_lon" in ds:
-            center_lon = float(extract_single_value(ds["tra_lon"]))
-        elif "title" in ds.attrs:
-            match = re.search(r"Lon:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
-            if match:
-                center_lon = float(match.group(1))
-            else:
-                raise ValueError(
-                    "Could not extract 'center_lon' from title attribute. "
-                    "Expected format: '... Lon: <value> ...'"
-                )
-        else:
-            raise ValueError(
-                "Missing grid information: 'center_lon' attribute, 'tra_lon' variable, or 'Lon:' in 'title' attribute "
-                "must be present in the dataset."
-            )
-        grid.center_lon = center_lon
-        if "center_lat" in ds.attrs:
-            center_lat = float(ds.attrs["center_lat"])
-        elif "tra_lat" in ds:
-            center_lat = float(extract_single_value(ds["tra_lat"]))
-        elif "title" in ds.attrs:
-            match = re.search(r"Lat:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
-            if match:
-                center_lat = float(match.group(1))
-            else:
-                raise ValueError(
-                    "Could not extract 'center_lat' from title attribute. "
-                    "Expected format: '... Lon: <value> ...'"
-                )
-        else:
-            raise ValueError(
-                "Missing grid information: 'center_lat' attribute, 'tra_lat' variable, or 'Lat:' in 'title' attribute "
-                "must be present in the dataset."
-            )
-        grid.center_lat = center_lat
-        if "rot" in ds.attrs:
-            rot = float(ds.attrs["rot"])
-        elif "rotate" in ds:
-            rot = float(extract_single_value(ds["rotate"]))
-        elif "title" in ds.attrs:
-            match = re.search(r"rotate:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
-            if match:
-                rot = float(match.group(1))
-            else:
-                raise ValueError(
-                    "Could not extract 'rot' from title attribute. "
-                    "Expected format: '... rotate: <value> ...'"
-                )
-        else:
-            raise ValueError(
-                "Missing grid information: 'rot' attribute, 'rotate' variable, or 'rotate:' in 'title' attribute "
-                "must be present in the dataset."
-            )
-        grid.rot = rot
-
-        for attr in [
-            "size_x",
-            "size_y",
-            "hmin",
-        ]:
-            if attr in ds.attrs:
-                value = float(ds.attrs[attr])
-            else:
-                value = None
-
-            object.__setattr__(grid, attr, value)
-
         if "topography_source_name" in ds.attrs:
             if "topography_source_path" in ds.attrs:
                 topo_source = {
